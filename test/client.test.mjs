@@ -73,6 +73,7 @@ async function loadClient({ react }) {
   // 客户端文件是**脚本**不是模块：用 Function 在当前作用域里跑，把 window 与 require 注进去
   const fn = new Function('window', 'require', 'document', src)
   const document = {
+    baseURI: 'https://example.test/',
     querySelector: () => null,
     createElement: () => ({ setAttribute() {}, textContent: '' }),
     head: { appendChild() {} },

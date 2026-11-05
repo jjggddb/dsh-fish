@@ -202,6 +202,8 @@ test('换过会话之后，自动醒一醒也要落到新会话（不是启动�
     } finally {
       s.dispose()
     }
+    assert.equal(inWake(), false, 'dispose must release a pending wake window')
+    assert.equal(h.listeners.length, 0, 'dispose must remove pending turn listeners')
   })
 })
 
