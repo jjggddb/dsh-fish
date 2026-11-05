@@ -149,6 +149,37 @@ test('claimRoot：同机 pid 还活着 → 心跳新鲜时仍然拒绝（两份�
   assert.equal(other.ok, false)
 })
 
+test('claimRoot：容器重启复用 PID 仍能接管，同进程第二个实例不能抢锁', async () => {
+  const root = await tmpRoot()
+  const now = 1_800_000_000_000
+  const common = { pid: process.pid, host: 'same-container' }
+  await claimRoot(root, { ...common, instanceId: 'old', now, processStartedAt: now - 5000 })
+  const restarted = await claimRoot(root, {
+    ...common, instanceId: 'new', now: now + 1000, processStartedAt: now + 500,
+  })
+  assert.equal(restarted.ok, true, '旧心跳尚新鲜，但 PID 已属于新进程')
+  const duplicate = await claimRoot(root, {
+    ...common, instanceId: 'duplicate', now: now + 1500, processStartedAt: now + 500,
+  })
+  assert.equal(duplicate.ok, false, '同一进程内另一实例仍不得共用 root')
+  assert.equal(duplicate.owner.instanceId, 'new')
+})
+
+test('claimRoot：兼容旧锁且不把远端相同 PID 当成本机重启', async () => {
+  const root = await tmpRoot()
+  const now = 1_800_000_000_000
+  const old = { instanceId: 'legacy', pid: process.pid, host: 'same-container', bootAt: now - 5000, beatAt: now }
+  await fs.writeFile(join(root, TENANT_FILE), JSON.stringify(old))
+  const remote = await claimRoot(root, {
+    instanceId: 'remote', now: now + 1000, host: 'another-host', processStartedAt: now + 500,
+  })
+  assert.equal(remote.ok, false)
+  const restarted = await claimRoot(root, {
+    instanceId: 'new', now: now + 1000, host: old.host, processStartedAt: now + 500,
+  })
+  assert.equal(restarted.ok, true)
+})
+
 test('claimRoot：旧声明过期（心跳断了）可以被接管；release 之后也能立刻接管', async () => {
   const root = await tmpRoot()
   const now = 1_800_000_000_000
