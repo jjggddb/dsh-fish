@@ -1,7 +1,7 @@
 {
   "name": "dsh-fish",
-  "version": "0.9.0",
-  "description": "基于 dsh-fish 的微信群二开：经历驱动人格、分群记忆、旁听与自主参与",
+  "version": "0.10.0",
+  "description": "基于 dsh-fish 的单插件微信群二开：微信接入、会话编排、人格记忆与 DSH 工具授权",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -16,10 +16,14 @@
     "cordis.patch.yml",
     "README.md",
     "AGENTS.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "vendor",
+    "scripts/build-sdk.mjs"
   ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build": "node scripts/build-sdk.mjs",
+    "prepack": "npm run build"
   },
   "dsh": {
     "bundle": {

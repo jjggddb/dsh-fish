@@ -68,7 +68,6 @@ async function fixture(
   }
   const registry = { list: () => [], create: async () => ({ id: 'workspace' }) }
   const ctx = {
-    wechatNative: native,
     agents: { currentInitiator: () => null },
     get: (n) => (n === 'workspaceRegistry' ? registry : undefined),
     tools: {
@@ -128,7 +127,7 @@ async function fixture(
   }
   registerCapture(ctx, { root, tenant: tenancy })
   registerRecall(ctx, { root, tenant: tenancy })
-  apply(ctx, { root, ready: Promise.resolve(), tenant: tenancy, config: {} })
+  apply(ctx, { root, ready: Promise.resolve(), tenant: tenancy, native })
   for (let i = 0; i < 20 && !handler; i++) await delay(1)
   t.after(async () => {
     for (const fn of cleanup.reverse()) await fn?.()

@@ -31,6 +31,12 @@ jobs:
       - name: 跑测试
         run: npm test
 
+      - name: 生成并检查 SDK
+        run: |
+          npm run build
+          git diff --exit-code -- lib/wechat/sdk
+          npm pack --dry-run
+
   # Windows 单独跑一轮：路径归一化与 chmod 语义在这边和 Linux 不一样，
   # 而这些正是这个插件最容易出问题的地方。
   test-windows:

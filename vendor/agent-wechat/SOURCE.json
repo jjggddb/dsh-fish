@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/thisnick/agent-wechat",
+  "commit": "39af1eec84f4763e1257406f8c5fb848b31d82e9",
+  "tag": "v1.5.1",
+  "sha256": {
+    "native-client.ts": "b5544b8c90bf8c8a994e579d2e79c9fda42023678dbb7c093fd7cf8f42b34063",
+    "native-calls.ts": "c7d4f3a35223cd4c9e3d62a73edc62744c117bc8cc63824075df0859240059be",
+    "native.generated.ts": "dde815488f7a332edbdcece5af3ce9952bdc9a1098e96bf49cef2a5b801c6f1b",
+    "LICENSE": "d4d971acb3cac94865aad4787ab934038df90a304854b41f506ae1187350b574"
+  }
+}
