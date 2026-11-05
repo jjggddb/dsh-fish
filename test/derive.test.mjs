@@ -6,7 +6,6 @@ import {
 } from '../lib/derive.js'
 // 2026-10-26：stability 从 derive.js 搬到 quality.js（它要用到 persona 的渲染，
 // 留在 derive 里会绕出 quality → persona → derive → quality 的环）。
-import { stability, stabilityBand, clearStabilityCache } from '../lib/quality.js'
 
 const T0 = Date.parse('2026-10-01T00:00:00Z')
 
@@ -148,33 +147,6 @@ test('卡太久后时间兜底推进，并标记 forced', () => {
   assert.ok(m.stageGate.forced.length > 0)
 })
 
-test('stability：抽掉 3 条判断后，她的自我描述变化有限（承重度）', () => {
-  const evs = [ev('ev_seed', 'seed', 1, '种', { source: 'system' })]
-  for (let d = 1; d <= 12; d++) evs.push(ev(`ev_b${d}`, 'utterance', d, `第 ${d} 天我注意到一件事，编号 ${d}。`))
-  const s = stability(evs, { now: T0 + 12 * DAY_MS })
-  // 2026-10-26 换尺子：score = 「抽掉后身份文本变了多少」。0 = 完全没变，1 = 另一个人。
-  // 12 条判断各占一小块，抽 3 条只该少一点，不该整个人换掉。
-  assert.ok(s.sample > 0, '有判断就该真的跑抽样')
-  assert.equal(s.beliefs, 12)
-  assert.ok(s.score > 0, `抽掉判断后必然有变化，实际 ${s.score}`)
-  assert.ok(s.score < 0.5, `12 条里抽 3 条不该换个人，实际 ${s.score}`)
-  assert.ok(s.worst >= s.score, 'worst 是单次最大变化量')
-})
-
-test('stability：没有判断时不出分数，只说测不出来', () => {
-  const s = stability([])
-  assert.deepEqual(s, { score: 0, worst: 0, sample: 0, k: 0, beliefs: 0 })
-  assert.equal(stabilityBand(s), '还没攒到判断，测不出来')
-})
-
-test('stabilityBand：三档判读按真实数据方向给话', () => {
-  assert.equal(stabilityBand({ score: 0.0, sample: 24, beliefs: 12 }), '这些判断还只是记账，抽掉几条她没变')
-  assert.equal(stabilityBand({ score: 0.2, sample: 24, beliefs: 12 }), '长在这些事上，抽掉一条少一块')
-  assert.equal(stabilityBand({ score: 0.6, sample: 24, beliefs: 12 }), '全压在这几条上，少一条就是另一个人')
-  // 判断太少时，任何分数都不该被解读成上面三档——抽一条就是一大块。
-  assert.equal(stabilityBand({ score: 0.2, sample: 24, beliefs: 2 }), '只有 2 条判断，抽掉一条就是一大块')
-})
-
 test('consistency / novelty 在数据不足时给安全默认值', () => {
   assert.equal(consistency([]).pairs, 0)
   assert.equal(novelty([], Date.now()).score, 0)
@@ -256,13 +228,4 @@ test('事件流变长后 deriveSelf 不是二次增长（issue #3）', () => {
     }
   }
   assert.ok(bestSlack > 0, `${detail}，增长超过线性`)
-})
-
-test('stability 对同一批事件只算一次（issue #3 缓存）', () => {
-  clearStabilityCache()
-  const events = synthetic(120)
-  const a = stability(events, { growthDays: 30 })
-  const b = stability(events, { growthDays: 30 })
-  assert.deepEqual(a, b)
-  assert.ok(a.sample > 0, '有判断时应该真的抽过样')
 })

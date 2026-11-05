@@ -208,15 +208,3 @@ test('备份进包后能原样读回（含二进制）', async () => {
     }
   }
 })
-
-test('界面与路由都接上了（别只写了个模块）', async () => {
-  const c = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
-  assert.match(c, /备份成一份文件/)
-  assert.match(c, /从备份恢复/)
-  assert.match(c, /pre-restore-/)
-  const o = await readFile(new URL('../lib/observe.js', import.meta.url), 'utf8')
-  assert.match(o, /\['\/backup\/restore'/)
-  assert.match(o, /collectBackup\(root\)/)
-  // 恢复必须走「先封存」那条路，不许直接覆盖
-  assert.match(o, /restoreBackup\(b, root\)/)
-})

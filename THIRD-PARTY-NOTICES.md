@@ -1,21 +1,9 @@
-# 第三方来源与致谢
+# 来源、二次开发与许可
 
-本文件从 `LICENSE` 中拆出。`LICENSE` 保持标准 MIT 全文，便于 GitHub 正确识别协议；
-项目来源、引用与素材授权说明放在这里。
+本仓库基于 [ssamurias/dsh-fish](https://github.com/ssamurias/dsh-fish) 二次开发，继承其 MIT 许可代码。`LICENSE` 保留上游原始版权声明。
 
-## 代码来源
+继承的核心包括事件校验与追加存储、经历派生、判断/引用修正与召回、日记、进程租约及锁、备份、输入与外发防护。微信群观察、来源归属、分群隔离、参与决策、定时回合与简化管理功能由本 fork 维护。
 
-本项目**不含上游代码派生**：`lib/` 下全部实现（事件流、四个阶段与三道瓶颈、记忆显著性与固化、
-拒绝与疤、事件卡与节奏缩放等）均在本项目中新写；B 站接口的行为来自本机实测
-（见 `lib/bili.js` 头部注释），不是官方 API，未拷贝任何第三方库，插件也没有任何运行时依赖。
+本仓库不再包含上游 B 站、工作区出门、请神、桌面通知和自更新功能，不再分发这些功能的界面素材；旧版本可通过 Git 历史追溯。
 
-## 思想引用
-
-原理页引用了 Kolb / Piaget / Bowlby / Erikson / Festinger / Bartlett / Dewey / Schön 的理论，
-属思想引用，页底标注了作者与年份；不含他人代码或原文。
-
-## 美术资源
-
-- `media/fish.jpg`：作者提供的大肥鱼原图经 AI 生成，随本仓库以同一许可（MIT）授权。
-- `media/principle-loop.svg`、`media/principle-memory.svg`：本项目自绘。
-- 除此之外不含第三方美术资源——头像由用户自行上传（存在 `~/.dsh-fish/avatar.<ext>`）。
+DeepSeek Harness、agent-wechat Native 和 dsh-wechat-native 是独立项目，分别适用其仓库的许可与来源声明。本仓库不复制 Native 二进制或微信协议实现。

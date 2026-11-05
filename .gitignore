@@ -25,3 +25,21 @@ desktop.ini
 owner.json
 config.json
 .dev
+
+# 私有运行数据与凭据
+.env
+.env.*
+private/
+runtime.json
+native-token
+events.jsonl
+state.json
+channels.json
+group-state.json
+talk-recent.json
+instance.json
+notes.json
+diary/
+groups/
+backups/
+*.sqlite*

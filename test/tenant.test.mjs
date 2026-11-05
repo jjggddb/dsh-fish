@@ -82,7 +82,7 @@ test('checkCaller：cwd 在 root 里放行；在外面拒绝并说清楚', () =>
   assert.equal(sys.sessionId, '')
 })
 
-test('checkCaller：出门那条会话 cwd 在别人家，写事件仍放行；身份文件不放行', async () => {
+test('checkCaller：历史出门记录不能重新放行其他工作区', async () => {
   const root = await tmpRoot()
   // 关键：工作区在**她家外面**（真机出门就是这样），不是 root 的子目录
   const ws = await fs.mkdtemp(join(tmpdir(), `fish-outside-${process.pid}-`))
@@ -101,8 +101,8 @@ test('checkCaller：出门那条会话 cwd 在别人家，写事件仍放行；�
 
   // 出门这一条：写回自己家的事件照收（2026-10-29 bring_back 真机 bug 的同一条根因）
   const out = checkCaller(root, exec)
-  assert.equal(out.ok, true)
-  assert.equal(out.outside, true)
+  assert.equal(out.ok, false)
+  assert.equal(out.outside, undefined)
   assert.equal(out.sessionId, 'session-out')
 
   // 身份文件显式关掉这个例外：出门会话改不了自己的身份

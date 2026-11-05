@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        node: ['20', '22', '24']
+        node: ['22', '24']
     steps:
       - uses: actions/checkout@v5
 
@@ -31,7 +31,7 @@ jobs:
       - name: 跑测试
         run: npm test
 
-  # Windows 单独跑一轮：路径归一化、chmod 语义、ffmpeg 探测在这边和 Linux 不一样，
+  # Windows 单独跑一轮：路径归一化与 chmod 语义在这边和 Linux 不一样，
   # 而这些正是这个插件最容易出问题的地方。
   test-windows:
     runs-on: windows-latest

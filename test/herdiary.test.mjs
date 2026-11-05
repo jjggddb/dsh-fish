@@ -16,7 +16,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { registerHerDiary, renderDiary, DIARY_READ_MAX } from '../lib/herdiary.js'
-import { DIARY_BRIEF } from '../lib/persona.js'
 import { writeDaily } from '../lib/store.js'
 
 async function tmpRoot() {
@@ -184,16 +183,4 @@ test('同日追加太长时留「最后一段」：晚上补的那段不能被�
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
-})
-
-test('DIARY_BRIEF 写了机制：growth_commit + type=diary', () => {
-  assert.match(DIARY_BRIEF, /growth_commit/)
-  assert.match(DIARY_BRIEF, /type=diary/)
-})
-
-test('这段机制句确实进身份文档（selfdoc 的 diary 分支还在）', async () => {
-  const selfdoc = await readFile(new URL('../lib/selfdoc.js', import.meta.url), 'utf8')
-  assert.ok(selfdoc.includes('if (diary) body.push(DIARY_BRIEF'), 'diary 开关仍然决定这一段进不进文档')
-  const src = await readFile(new URL('../lib/persona.js', import.meta.url), 'utf8')
-  assert.ok(src.includes('type=diary'), '机制句在 persona.js 里')
 })

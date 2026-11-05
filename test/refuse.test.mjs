@@ -108,9 +108,9 @@ test('身份文档里带上"他听完怎么反应"，但只陈述事实，不评
   const m = deriveSelf(events, { growthDays: 30 })
   const text = personaLine(m, { budget: 4000 })
   assert.match(text, /## 你拒绝过/)
-  assert.match(text, /他又说了一遍/)
-  assert.match(text, /他因此难过了/)
-  assert.match(text, /有几次他还是坚持了，或者他因此不好受/)
+  assert.match(text, /对方又坚持了一次/)
+  assert.match(text, /对方因此难过了/)
+  assert.doesNotMatch(text, /有几次他还是坚持了，或者他因此不好受/, '不追加单主人预设剧情')
   // 只查「你拒绝过」这一段：文档别处本来就有黑名单里那句"不可以打分"，不能整篇查。
   const section = text.slice(text.indexOf('## 你拒绝过'))
   assert.doesNotMatch(section, /打分|得分|好感/)
