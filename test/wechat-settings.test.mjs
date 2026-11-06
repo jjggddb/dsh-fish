@@ -197,7 +197,7 @@ test('plural relationships preserve the original father and match verified conta
   const old = { id: 'old-contact', name: '家人' }
   db.db.prepare("INSERT INTO state VALUES('father',?)").run(JSON.stringify(old))
   assert.deepEqual(admin.father(), old)
-  assert.deepEqual(admin.relationships(), [{ ...old, title: '爸爸', role: '父亲' }])
+  assert.deepEqual(admin.relationships(), [{ ...old, title: '爸爸', remark:'爸爸', personalized:false }])
 
   const directory = [
     { username: 'other-contact', nickname: '同名', remark: '家里' },
@@ -215,8 +215,8 @@ test('plural relationships preserve the original father and match verified conta
   ])
   const rows = admin.relationships()
   assert.equal(rows.length, 3)
-  assert.equal(rows.find(person => person.id === selected.id).role, '母亲')
-  assert.equal(rows.find(person => person.id === 'classmate').role, '')
+  assert.equal(rows.find(person => person.id === selected.id).remark, '老妈')
+  assert.equal(rows.find(person => person.id === 'classmate').remark, '小太阳')
   assert.deepEqual(native.config.contacts, [])
   assert.equal(native.permits(selected.id), false)
   await assert.rejects(admin.changeRelationship({ action: 'add', id: selected.id, title: '姐姐' }), /已绑定/)
@@ -250,4 +250,22 @@ test('legacy settings cannot erase other relationships or arbitrarily choose bet
   assert.deepEqual(admin.relationships().map(row => row.title), ['老师'])
   client.contact = async () => ({ username: 'new', deleted: true })
   await assert.rejects(admin.changeRelationship({ action: 'add', id: 'new', title: '姐姐' }), /无效/)
+})
+
+test('personal remarks survive reopening by stable ID; an old turn cannot restore a renamed or removed relationship', async t => {
+  const {admin, db,root}=await fixture(t)
+  const id='friend', msg={id:'g1',senderId:'verified',accountId:'test',threadId:'1@chatroom'}
+  await admin.changeRelationship({action:'add',id,title:'二哥'})
+  db.commitEvent('1',msg)
+  const edit={id,title:'二哥',previous:'二哥',source:msg.id,remark:'鱼窝的二哥'}
+  db.saveContactRemarks([edit],msg.threadId,'test')
+  assert.equal(admin.relationships()[0].personalized,true)
+  const again=new Store(root)
+  try {again.bind('test','bot');assert.equal(again.contactRemarks()[0].remark,'鱼窝的二哥')}finally{again.close()}
+  await admin.changeRelationship({action:'rename',id,title:'师兄'})
+  db.saveContactRemarks([edit],msg.threadId,'test')
+  assert.deepEqual(admin.relationships()[0],{id,name:'朋友',title:'师兄',remark:'师兄',personalized:false})
+  await admin.changeRelationship({action:'remove',id})
+  db.saveContactRemarks([edit],msg.threadId,'test')
+  assert.deepEqual(db.contactRemarks(),[])
 })
