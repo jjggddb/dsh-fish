@@ -20,7 +20,7 @@ import { sayToHer, beginTurnWait } from '../lib/say.js'
 
 async function fixture(
   t,
-  { reason = 'completed', action = 'reply', remember = true, media = false, beforeDecide, afterDecide, decision, beforeImage, awaiting = [], newerInput } = {},
+  { setup, reason = 'completed', action = 'reply', remember = true, media = false, beforeDecide, afterDecide, decision, beforeImage, awaiting = [], newerInput } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'fish-group-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -134,6 +134,7 @@ async function fixture(
   }
   registerCapture(ctx, { root, tenant: tenancy })
   registerRecall(ctx, { root, tenant: tenancy })
+  await setup?.({ctx, native, root})
   apply(ctx, { root, ready: Promise.resolve(), tenant: tenancy, native })
   for (let i = 0; i < 20 && !handler; i++) await delay(1)
   t.after(async () => {
@@ -648,4 +649,45 @@ test('another participant cannot consume the draft held for a correction', async
   assert.doesNotMatch(f.observed[1], /上一轮草稿未发送|要蓝色还是红色/)
   assert.match(f.observed[2], /"text":"要蓝色还是红色？"/)
   assert.match(f.observed[2], /"reply":"白饭来啦。"/)
+})
+
+test('the group entry point binds the requester and confirms only the persisted clock result', async t => {
+  const records = []
+  let db, commands = 0
+  const f = await fixture(t, {
+    remember:false,
+    setup:async ({ctx,native,root}) => {
+      db = new Store(join(root,'reminder-db'))
+      native.store = db
+      native.permits = () => true
+      const get = ctx.get
+      ctx.get = k => k === 'schedule' ? {
+        catalog:async () => records,
+        create:async (sessionId,req) => {
+          const r={...req,id:'test-alarm',kind:'at',scheduledAt:req.at,sessionId,status:'active'}
+          records.push(r);return r
+        },
+      } : get(k)
+      await writeConfig({tools:{allow:['wechat_reminder']},group:{fastWindowMs:50,slowWindowMs:50}},root)
+    },
+    beforeDecide:async (turn,tools,exec) => {
+      const scope=activeTurn(f.root, exec.agent.session.id)
+      if (!scope.reminderRequest) return
+      assert.equal(scope.messages.length,1);commands++
+      const r=await tools.get('wechat_reminder').execute({action:'create',after_seconds:300,text:'喝水'},exec)
+      assert.match(r.reply,/已设好/)
+    },
+  })
+  const m={...f.message('alarm'),body:'大肥鱼，五分钟后提醒我喝水'}
+  db.commitEvent('1',m)
+  await Promise.all([f.receive(f.message('bystander')),f.receive(m)])
+  assert.equal(commands,1);assert.equal(records.length,1)
+  assert.match(f.sent.find(r=>r.id===m.id).text,/已设好 #1.*喝水/)
+  assert.equal(db.db.prepare('select owner from fish_reminders').get().owner,m.senderId)
+  db.close()
+})
+test('a model promising an uncreated reminder cannot send that promise to WeChat', async t => {
+  const f=await fixture(t,{remember:false,decision:()=>({action:'reply',text:'两点一定叫你起床'})})
+  await f.receive({...f.message('alarm'),body:'2点叫我起床'})
+  assert.equal(f.sent[0].text,'微信提醒工具尚未启用。')
 })
