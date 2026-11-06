@@ -675,7 +675,7 @@ test('the group entry point binds the requester and confirms only the persisted 
   const records = []
   let db, commands = 0
   const f = await fixture(t, {
-    remember:false,
+    remember:false, decision:()=>({action:'reply',text:'定好了，一分钟。别赖床'}),
     setup:async ({ctx,native,root}) => {
       db = new Store(join(root,'reminder-db'))
       native.store = db
@@ -694,15 +694,16 @@ test('the group entry point binds the requester and confirms only the persisted 
       const scope=activeTurn(f.root, exec.agent.session.id)
       if (!scope.reminderRequest) return
       assert.equal(scope.messages.length,1);commands++
-      const r=await tools.get('wechat_reminder').execute({action:'create',after_seconds:300,text:'喝水'},exec)
-      assert.match(r.reply,/已设好/)
+      const r=await tools.get('wechat_reminder').execute({action:'create',after_seconds:60,text:'喂，一分钟到了。本鲸叫的，快点回话'},exec)
+      assert.match(r.reply,/已设好/);assert.doesNotMatch(r.reply,/一分钟到了/)
     },
   })
-  const m={...f.message('alarm'),body:'大肥鱼，五分钟后提醒我喝水'}
+  const m={...f.message('alarm'),body:'大肥鱼，一分钟后叫我一下'}
   db.commitEvent('1',m)
   await Promise.all([f.receive(f.message('bystander')),f.receive(m)])
   assert.equal(commands,1);assert.equal(records.length,1)
-  assert.match(f.sent.find(r=>r.id===m.id).text,/已设好 #1.*喝水/)
+  assert.deepEqual(f.sent.filter(r=>r.id===m.id).map(r=>r.text),['定好了，一分钟。别赖床'])
+  assert.equal(records[0].title,'喂，一分钟到了。本鲸叫的，快点回话')
   assert.equal(db.db.prepare('select owner from fish_reminders').get().owner,m.senderId)
   db.close()
 })

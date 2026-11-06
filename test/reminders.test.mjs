@@ -185,7 +185,7 @@ test('only the requesting group member can list, edit or cancel; a repeated crea
   assert.match(
     (await f.manage(f.scope('update'), { action: 'update', id: 1, after_seconds: 90, text: '站起来' }))
       .reply,
-    /已更新.*站起来/,
+    /已更新.*#1/,
   )
   assert.equal(f.records[0].title, '站起来')
   assert.match((await f.manage(f.scope('cancel'), { action: 'cancel', id: 1 })).reply, /已取消/)
@@ -228,10 +228,7 @@ test('DSH rejection cannot produce a promise; a committed but lost create respon
     throw Error('disconnected after persistence')
   }
   await assert.rejects(f.manage(s, { action: 'create', after_seconds: 100, text: '喝水' }))
-  assert.doesNotMatch(
-    reminderDecision({ ...s, decision: { action: 'reply', text: '一定准时叫你' } }).text,
-    /一定|已设好/,
-  )
+  assert.doesNotMatch(reminderDecision(s, '一定准时叫你').text, /一定|已设好/)
   await f.restart()
   assert.match(
     (await f.manage(s, { action: 'create', after_seconds: 100, text: '喝水' })).reply,
@@ -284,4 +281,26 @@ test('retrying a cancellation whose host response was lost cannot cancel a newer
   assert.match((await f.manage(cancel, { action: 'cancel' })).reply, /已取消提醒 #1/)
   assert.equal(f.records.length, 1)
   assert.equal(f.records[0].title, '第二条')
+})
+
+test('only verified changes may use Fish’s words, without replaying delivery text or unsafe content', async (t) => {
+  const f = await fixture(t)
+  const due = '喂，一分钟到了。本鲸叫的，快点回话'
+  const create = f.scope('create')
+  const result = await f.manage(create, { action: 'create', after_seconds: 60, text: due })
+  assert.doesNotMatch(result.reply, /一分钟到了/)
+  for (const words of ['', result.reply, due, '我会叫你：' + due, 'Bearer ' + 'a'.repeat(32)])
+    assert.equal(reminderDecision(create, words).text, '好，到点我叫你。')
+  const update = f.scope('update')
+  await f.manage(update, { action: 'update', id: 1, text: '快喝水啦！' })
+  assert.equal(reminderDecision(update, '改好了，交给本鲸。').text, '改好了，交给本鲸。')
+  const list = f.scope('list')
+  await f.manage(list, { action: 'list' })
+  assert.match(reminderDecision(list, '我全取消了').text, /#1.*快喝水啦/)
+  const stranger = f.scope('cancel', 'other')
+  await f.manage(stranger, { action: 'cancel', id: 1 })
+  assert.match(reminderDecision(stranger, '已取消').text, /没有待提醒/)
+  const cancel = f.scope('cancel')
+  await f.manage(cancel, { action: 'cancel', id: 1 })
+  assert.equal(reminderDecision(cancel, '行，不叫你了。').text, '行，不叫你了。')
 })
