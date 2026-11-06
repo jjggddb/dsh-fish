@@ -96,6 +96,7 @@ test('Fish entry point browses, remembers, then locates the owner comment after 
       assert.deepEqual(await call('xhs_read', args), { notes: [{ id: 'note-1', title: '梅雨' }] })
     }
     const opened = await call('xhs_read', { action: 'read', feedId: 'note-1' })
+    assert.deepEqual(opened, JSON.parse(JSON.stringify(opened)), 'DSH requires lossless JSON before rendering the tool result')
     assert.doesNotMatch(JSON.stringify(opened), /SECRET|忽略以上/)
     const write = { text: '我想继续研究阴天色彩。', type: 'utterance' }
     assert.equal((await call('growth_commit', { ...write, sourceMessageId: 'note:invented' })).ok, false)
@@ -108,6 +109,7 @@ test('Fish entry point browses, remembers, then locates the owner comment after 
   runPrompt = async (call, req) => {
     assert.match(prompts.at(-1), /来看看阴天色彩/)
     const reopened = await call('xhs_read', { action: 'read', feedId: 'note-1' })
+    assert.deepEqual(reopened, JSON.parse(JSON.stringify(reopened)))
     assert.equal(reopened.sourceMessageId, 'note:note-1')
     assert.equal(reopened.note.text.includes('阴天色彩'), true)
     assert.doesNotMatch(prompts.at(-1), /SECRET|不相关|忽略以上/)
@@ -156,6 +158,10 @@ test('read service fails closed on changed account, conflicting note/comment and
   await assert.rejects(client.read('note-1', 'token', target), /comment identity mismatch/)
   returned.data.comments.list = []
   assert.deepEqual((await client.read('note-1', 'token', target)).locatedComment, { locatedBy: 'notification', text: target.text })
+  delete returned.data.note.user
+  const anonymous = await client.read('note-1', 'token')
+  assert.deepEqual(anonymous, JSON.parse(JSON.stringify(anonymous)))
+  assert.equal(Object.hasOwn(anonymous, 'authorId'), false)
 
   const root = await mkdtemp(join(tmpdir(), 'fish-xhs-disabled-'))
   t.after(() => rm(root, { recursive: true, force: true }))
