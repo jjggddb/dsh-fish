@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -344,23 +344,36 @@ const stickerData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP
 for (const text of ['', '太好笑了']) {
   test('catalog selection replies to the source with ' + (text ? 'text and image' : 'only an image'), async t => {
     let sticker
-    const f = await fixture(t, { remember: false, decision: () => ({ action: 'reply', stickerId: sticker.id, text }) })
+    const f = await fixture(t, { remember: false, decision: () => ({ action: 'reply', stickerKeywords: ['大笑'], text }) })
     sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '大笑' }))[0]
     const msg = f.message('laugh', text ? 'room@chatroom' : 'contact')
     await f.receive(msg)
-    assert.match(f.observed[0], /大笑/)
-    assert.ok(f.observed[0].includes(sticker.id))
+    assert.doesNotMatch(f.observed[0], /大笑/)
+    assert.ok(!f.observed[0].includes(sticker.id))
     assert.ok(!f.observed[0].includes(stickerData))
     assert.deepEqual(f.sent.map(part => part.text || part.image), text ? [text, true] : [true])
     assert.equal(f.sent.at(-1).id, msg.id)
     assert.equal((await groupState(f.root)).groups[msg.threadId].lastReply.text, [text, '［表情：大笑］'].filter(Boolean).join(' '))
   })
 }
+test('matching uses the live catalog after the reply decision', async t => {
+  const f = await fixture(t, {
+    remember: false,
+    decision: () => ({ action: 'reply', stickerKeywords: ['感谢', '谢谢'] }),
+    afterDecide: () => changeSticker(f.root, { action: 'upload', data: stickerData, description: '谢谢｜收到帮助时鞠躬道谢' }),
+  })
+  const msg = f.message('thanks')
+  await f.receive(msg)
+  assert.equal(f.sent.length, 1)
+  assert.equal(f.sent[0].image, true)
+  assert.equal(f.observed.length, 1)
+  assert.ok(!f.observed[0].includes('鞠躬道谢'))
+})
 for (const action of ['toggle', 'delete']) {
   test(action + ' after an agent choice blocks image submission', async t => {
     let sticker
     const f = await fixture(t, {
-      remember: false, decision: () => ({ action: 'reply', stickerId: sticker.id }),
+      remember: false, decision: () => ({ action: 'reply', stickerKeywords: ['无奈'] }),
       beforeImage: () => changeSticker(f.root, { action, enabled: false, id: sticker.id }),
     })
     sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '无奈' }))[0]
@@ -369,31 +382,38 @@ for (const action of ['toggle', 'delete']) {
     assert.equal((await groupState(f.root)).recent.at(-1).status, 'send_blocked')
   })
 }
-test('disabled images are excluded from the prompt and rejected if supplied by ID', async t => {
-  let sticker
-  const f = await fixture(t, { remember: false, action: 'silent',
-    beforeDecide: async (_turn, tools, exec) => {
-      await assert.rejects(tools.get('fish_decide').execute({ action: 'reply', stickerId: sticker.id }, exec), /available sticker/)
-    },
+for (const text of ['', '谢谢啦']) {
+  test('unmatched sticker request skips the image and preserves text: ' + text, async t => {
+    const f = await fixture(t, { remember: false, decision: () => ({ action: 'reply', stickerKeywords: ['感谢'], text }) })
+    const [item] = await changeSticker(f.root, { action: 'upload', data: stickerData, description: '感谢' })
+    await changeSticker(f.root, { action: 'toggle', id: item.id, enabled: false })
+    await f.receive(f.message('disabled'))
+    assert.deepEqual(f.sent.map(part => part.text), text ? [text] : [])
+    assert.ok(!f.observed[0].includes(item.id))
+    assert.equal((await groupState(f.root)).recent.at(-1).status, text ? 'accepted' : 'sticker_unmatched')
   })
-  sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '大笑' }))[0]
-  await changeSticker(f.root, { action: 'toggle', id: sticker.id, enabled: false })
-  await f.receive(f.message('disabled'))
-  assert.ok(!f.observed[0].includes(sticker.id))
-  assert.deepEqual(f.sent, [])
-})
+}
+for (const action of ['silent', 'reply']) {
+  test('a plain ' + action + ' decision never opens the sticker index', async t => {
+    const f = await fixture(t, { remember: false, action })
+    await mkdir(join(f.root, 'stickers'))
+    await writeFile(join(f.root, 'stickers/index.json'), 'invalid JSON')
+    await f.receive(f.message('plain'))
+    assert.equal(f.observed.length, 1)
+    assert.equal(f.sent.length, action === 'silent' ? 0 : 1)
+  })
+}
 test('cancelled turn discards selected sticker', async t => {
-  let sticker
-  const f = await fixture(t, { reason: 'cancelled', remember: false, decision: () => ({ action: 'reply', stickerId: sticker.id }) })
-  sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '傲慢' }))[0]
+  const f = await fixture(t, { reason: 'cancelled', remember: false, decision: () => ({ action: 'reply', stickerKeywords: ['傲慢'] }) })
+  await mkdir(join(f.root, 'stickers'))
+  await writeFile(join(f.root, 'stickers/index.json'), 'invalid JSON')
   await assert.rejects(f.receive(f.message('cancel')), /Agent turn/)
   assert.deepEqual(f.sent, [])
 })
 test('new input after text acceptance skips the image and retains only delivered text', async t => {
-  let sticker
-  const f = await fixture(t, { remember: false, decision: () => ({ action: 'reply', text: '好', stickerId: sticker.id }),
+  const f = await fixture(t, { remember: false, decision: () => ({ action: 'reply', text: '好', stickerKeywords: ['点头'] }),
     newerInput: () => f.sent.length > 0 })
-  sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '点头' }))[0]
+  await changeSticker(f.root, { action: 'upload', data: stickerData, description: '点头' })
   const msg = f.message('changed')
   await f.receive(msg)
   assert.equal(f.sent.length, 1)
