@@ -136,3 +136,13 @@ test('new input between preparing a reply and submission prevents the external s
  await assert.rejects(f.transport.sendText(first.id,'obsolete',{beforeSubmit:()=>!f.transport.newerInput(first.threadId,[first.id],{pendingOnly:true})}),e=>e.code==='STALE_REPLY')
  assert.equal(f.submitted(),0)
 })
+test('Native 1.5.1 quote sidecars and original images without previews produce real attachment bytes',async t=>{
+ const f=fixture(t);await f.transport.verify()
+ for(const [i,quoted] of [false,true].entries()){
+  const m=f.message('pic'+i,quoted?{type:49,quote:{embeddedImage:true,type:3,serverId:'12'}}:{type:3})
+  await f.transport.ingest(f.event(m,String(i+1)))
+  f.client.mediaAssets=async()=>({items:[{id:'asset',messageId:m.id,accountId:m.accountId,kind:'image',state:'available',variant:'original'}]})
+  f.client.mediaContent=async(_a,_id,o)=>{assert.equal(o.representation,'original');return {bytes:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l0cAAAAASUVORK5CYII=','base64')}}
+  const r=await f.transport.readImage(m.id,{quoted});assert.equal(r.mimeType,'image/png')
+ }
+})

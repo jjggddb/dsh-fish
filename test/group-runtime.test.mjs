@@ -97,7 +97,11 @@ async function fixture(
           agent: { session: { id: req.sessionId, header: { cwd: join(root, 'home') } } },
         }
         observed.push(req.content[0].text)
-        if(beforeDecide)await beforeDecide(turn)
+        if(beforeDecide && await beforeDecide(turn,tools,exec) === false){
+          emit('assistant/message',{ message:{content:[{type:'text',text:'这是草稿，不能直接发。'}]} })
+          emit('turn/end',{reason:{kind:reason}})
+          return {accepted:true}
+        }
         if (remember) {
           const written = await tools
             .get('growth_commit')
@@ -145,7 +149,7 @@ async function fixture(
     ctx,
     tenancy,
     sent,
-    observed,
+    observed, native,
     message,
     receive: (m) => handler(m),
     created: () => created,
@@ -175,7 +179,7 @@ test('silent observation can retain memory without sending', async (t) => {
   await f.receive(f.message('one'))
   assert.equal(f.sent.length, 0)
   assert.equal((await readEvents(f.root)).events.filter((e) => e.type === 'utterance').length, 1)
-  assert.equal((await groupState(f.root)).recent.at(-1).status, 'silent')
+  assert.equal((await groupState(f.root)).recent.at(-1).status, 'decision_silent')
 })
 test('an interrupted model turn never sends its staged reply', async (t) => {
   const f = await fixture(t, { reason: 'cancelled' })
@@ -423,4 +427,47 @@ test('a busy room can still interject after reconsidering its draft with a new m
   assert.match(f.observed[1],/草稿未发送/)
   assert.doesNotMatch(f.observed[1],/这轮可能是直接提问/)
   assert.ok(checks.some(c=>c.options.peer?.includes('person-old')))
+})
+
+test('a directly addressed draft gets exactly one correlated decision retry and one send',async t=>{
+  const f=await fixture(t,{remember:false,beforeDecide:n=>n===1?false:undefined})
+  await f.receive({...f.message('one'),mentions:{self:true}})
+  assert.equal(f.observed.length,2);assert.match(f.observed[1],/只调用一次 fish_decide/)
+  assert.deepEqual(f.sent.map(s=>[s.id,s.text]),[['one','白饭来啦。']])
+  assert.equal(f.created(),1)
+})
+test('two plain-text drafts remain unsent and the outcome is missing, not chosen silence',async t=>{
+  const f=await fixture(t,{beforeDecide:()=>false})
+  await f.receive({...f.message('one'),mentions:{self:true}})
+  const r=(await groupState(f.root)).recent.at(-1)
+  assert.equal(f.observed.length,2);assert.equal(f.sent.length,0)
+  assert.equal(r.status,'decision_missing');assert.equal(r.retried,true)
+  await f.receive(f.message('ordinary'))
+  assert.equal(f.observed.length,3)
+  assert.equal((await groupState(f.root)).recent.at(-1).retried,false)
+})
+test('a failed first direct turn cannot trigger a repair or send its draft',async t=>{
+  const f=await fixture(t,{reason:'cancelled',beforeDecide:()=>false})
+  await assert.rejects(f.receive({...f.message('at'),mentions:{self:true}}),/cancelled/)
+  assert.equal(f.observed.length,1);assert.equal(f.sent.length,0)
+})
+test('short references select original and quoted images only in the bound window',async t=>{
+  const calls=[]
+  const f=await fixture(t,{action:'silent',remember:false,beforeDecide:async(_n,tools,exec)=>{
+    exec.agent.options={provider:'fixture',model:'vision'}
+    const tool=tools.get('wechat_read_image')
+    await assert.rejects(tool.execute({imageNo:3},exec),/编号/)
+    for(const imageNo of [1,2]) {
+      const r=await tool.execute({imageNo},exec)
+      assert.equal(tool.output.render({},r)[1].type,'image')
+    }
+  }})
+  f.native.readImage=async(id,{quoted})=>{calls.push([id,quoted]);return {mimeType:'image/png',data:'Zg=='}}
+  const originalGet=f.ctx.get
+  f.ctx.get=k=>k==='llm'?{resolveModelInfo:async(p,m)=>{assert.equal(m,'vision');return {inputModalities:['image']}}}:
+    k==='attachments'?{saveImage:async()=>({id:'attached'})}:originalGet(k)
+  await Promise.all([f.receive({...f.message('long-original'),type:3}),
+    f.receive({...f.message('long-outer'),quote:{embeddedImage:true}})])
+  assert.match(f.observed[0],/"imageNo":1/);assert.match(f.observed[0],/"quotedImageNo":2/)
+  assert.deepEqual(calls,[['long-original',false],['long-outer',true]])
 })
