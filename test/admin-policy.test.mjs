@@ -229,8 +229,8 @@ test('boot preserves the existing seed and registers only core tools without wak
     },
   }
   const instance = apply(ctx, { root, seed: '不能覆盖已有的这位' })
-  for (let i = 0; i < 100 && registered.length < 4; i++) await new Promise((r) => setTimeout(r, 5))
-  assert.deepEqual(registered, ['growth_commit', 'her_recall', 'her_diary', 'her_note'])
+  for (let i = 0; i < 100 && registered.length < 5; i++) await new Promise((r) => setTimeout(r, 5))
+  assert.deepEqual(registered, ['fish_gallery','growth_commit', 'her_recall', 'her_diary', 'her_note'])
   await instance.dispose()
   assert.equal(await readFile(join(root, 'events.jsonl'), 'utf8'), before)
   assert.equal((await readEvents(root)).events.filter((e) => e.type === 'seed').length, 1)

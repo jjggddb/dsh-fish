@@ -75,7 +75,7 @@ test('a first-time installation can enable and disable from settings without wak
   assert.equal(api.info().config.enabled, false)
   const config = { ...api.info().config, enabled: true, accountId: 'fish', ownerId: 'owner' }
   await api.save(config)
-  assert.equal(registered, 1)
+  assert.equal(registered, 4)
   const changes = [api.save({ ...config, intervalMs: 180000 }), api.save({ ...config, enabled: false })]
   await Promise.all(changes)
   assert.deepEqual(JSON.parse(await readFile(join(root, 'xhs-settings.json'))), { ...config, enabled: false })
@@ -119,7 +119,7 @@ test('changing the browsing interval preserves the previous browse time in a leg
   }
 })
 
-test('an old panel patch preserves filters and separate tool grants; only an authorized group can be selected', async t=>{
+test('old filters are preserved; personal decisions are no longer panel settings', async t=>{
   const root=await mkdtemp(join(tmpdir(),'fish-xhs-flags-'));t.after(()=>rm(root,{recursive:true,force:true}))
   const catalog=new Set()
   const ctx={tools:{register(tool){catalog.add(tool.name);return()=>catalog.delete(tool.name)}}}
@@ -128,16 +128,16 @@ test('an old panel patch preserves filters and separate tool grants; only an aut
     native:()=>({identity:()=>({accountId:'wechat'}),authorizedGroups:()=>[{id:target.groupId,name:'测试群'}]})})
   t.after(()=>api.dispose())
   const old={enabled:true,accountId:'fish',ownerId:'owner',baseUrl:'http://127.0.0.1:18060',intervalMs:60000}
-  const settings={...old,shareEnabled:true,shareTarget:target,allowedTypes:['text'],blockedWords:['测试词'],dailyMinutes:12}
-  await assert.rejects(api.save({...settings,shareTarget:{...target,groupId:'1@chatroom'}}),/授权/)
-  await assert.rejects(api.save({...settings,publishEnabled:true}),/配图/)
+  const settings={...old,allowedTypes:['text'],blockedWords:['测试词'],dailyMinutes:12}
+  await assert.rejects(api.save({...settings,shareTarget:{...target,groupId:'1@chatroom'}}),/字段无效/)
+  await assert.rejects(api.save({...settings,publishEnabled:true}),/字段无效/)
   await assert.rejects(api.save({...old,dailyMinutes:-1}),/分钟/)
   await assert.rejects(api.save({...old,allowedTypes:['audio']}),/类型/)
   await api.save(settings)
-  assert.deepEqual([...catalog],['xhs_read','xhs_share'])
+  assert.deepEqual([...catalog],['xhs_read','xhs_comment','xhs_publish','xhs_share'])
   const updated=await api.save({...old,intervalMs:120000})
   assert.deepEqual(updated.grants,[])
   assert.equal(updated.config.dailyMinutes,12);assert.deepEqual(updated.config.allowedTypes,['text'])
-  assert.deepEqual(updated.config.shareTarget,target)
-  await api.save({...updated.config,shareEnabled:false});assert.deepEqual([...catalog],['xhs_read'])
+  assert.equal(updated.config.shareTarget,undefined)
+  await api.save({...updated.config,enabled:false});assert.deepEqual([...catalog],[])
 })

@@ -5,6 +5,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { xhsSettings, actionNames } from '../lib/xhs/config.js'
+import { registerGallery } from '../lib/gallery-tools.js'
+import { changeGallery } from '../lib/gallery.js'
 import { xhsClient } from '../lib/xhs/provider.js'
 import { createXhs } from '../lib/xhs/index.js'
 import { reserveTime } from '../lib/xhs/policy.js'
@@ -13,9 +15,9 @@ import { writeConfig } from '../lib/store.js'
 import { Store } from '../lib/wechat/store.js'
 import { scopeRoot } from '../lib/scope.js'
 
-const target = { accountId: 'wechat-account', groupId: '123@chatroom' }
-const raw = { accountId: 'fish', ownerId: 'owner', enabled: true, commentEnabled: true, publishEnabled: true,
-  publishImages: ['https://images.example/cover.png'], shareEnabled: true, shareTarget: target }
+const target = { accountId:'wechat-account',groupId:'123@chatroom',name:'读书群',scene:'group' }
+const raw={accountId:'fish',ownerId:'owner',enabled:true}
+const data='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l0cAAAAASUVORK5CYII='
 const notice = { id: 'notification1', type: 'mention/comment', from: {user_id:'owner'}, feed_id: 'post1',
   comment_id: 'comment1', feed_xsec_token: 'private-handle', comment_text: '看看' }
 
@@ -66,6 +68,7 @@ test('daily time is reserved durably, refunded only for actual completion and sp
 async function runFixture(t, {reason='completed', publishUnknown=false, grant=actionNames, overrides={}}={}) {
   const root=await mkdtemp(join(tmpdir(),'fish-actions-'))
   t.after(()=>rm(root,{force:true,recursive:true}))
+  await changeGallery(root,{action:'upload',description:'游记配图',data})
   await writeConfig({tools:{allow:['xhs_read',...grant]}},root)
   const tools=new Map(), listeners=new Set(), writes=[], shares=[]
   const config=xhsSettings({...raw,...overrides})
@@ -79,8 +82,8 @@ async function runFixture(t, {reason='completed', publishUnknown=false, grant=ac
     else {
       assert.equal(ended,true,'external write before turn/end')
       writes.push([path,body])
-      if(path==='publish'&&publishUnknown)throw Error('lost response')
-      data=path==='publish'?{status:'发布完成',title:body.title,images:1}:{success:true,feed_id:'post1',target_comment_id:incoming.comment_id}
+      if(path==='fish/publish'&&publishUnknown)throw Error('lost response')
+      data=path==='fish/publish'?{status:'发布完成',title:body.title,images:1}:{success:true,feed_id:'post1',target_comment_id:incoming.comment_id}
     }
     return Response.json({success:true,data})
   }
@@ -101,20 +104,24 @@ async function runFixture(t, {reason='completed', publishUnknown=false, grant=ac
           assert.throws(()=>call('xhs_comment',{feedId:'invented',text:'无效'}))
           assert.throws(()=>call('xhs_comment',{feedId:'post1',commentId:'other',text:'无效'}))
           assert.deepEqual(call('xhs_comment',{feedId:'post1',commentId:incoming.comment_id,text:'谢谢分享'}),{staged:true})
-          assert.throws(()=>call('xhs_publish',{title:'选择配图',text:'一段正文',imageNumbers:[9]}))
-          if(grant.includes('xhs_publish'))call('xhs_publish',{title:'观察笔记',text:'今天读到一段游记。',imageNumbers:[1]})
-          else assert.throws(()=>call('xhs_publish',{title:'a',text:'b',imageNumbers:[1]}),/授权/)
-          call('xhs_share',{feedId:'post1'})
+          const list=await call('fish_gallery',{action:'search',query:'游记'})
+          assert.equal(list.images[0].galleryNo,1)
+          assert.throws(()=>call('xhs_publish',{title:'选择配图',text:'一段正文',galleryNos:[9]}))
+          if(grant.includes('xhs_publish'))call('xhs_publish',{title:'观察笔记',text:'今天读到一段游记。',galleryNos:[1]})
+          else assert.throws(()=>call('xhs_publish',{title:'a',text:'b',galleryNos:[1]}),/授权/)
+          assert.equal(call('xhs_share',{action:'targets'}).targets[0].targetNo,1)
+          call('xhs_share',{action:'send',targetNo:1,feedId:'post1'})
           assert.equal(writes.length,priorWrites)
         } catch(e){promptFailure=e}
         ended=true;emit('turn/end',{reason:{kind:reason}})
       },
     },
   }
+  registerGallery(ctx,{root,tenant:{root,tenant:{ok:true}}})
   const fixture={
     root,writes,shares,nextMention() { incoming={...notice,id:'notice2',comment_id:'comment2'} },open() {
       return createXhs(ctx,config,{root,allow:['xhs_read',...grant],tenancy:{root,tenant:{ok:true}},request:req,
-        native:()=>({canShareXhs:t=>t.groupId===target.groupId,shareXhs:(dest,id,_key,live)=>{
+        native:()=>({shareTargets:()=>[target],canShareXhs:t=>t.groupId===target.groupId,shareXhs:(dest,id,_key,live)=>{
           assert.ok(ended&&live());shares.push({dest,id})
         }})})
     },check(){if(promptFailure)throw promptFailure},get prompts(){return prompts}
@@ -129,7 +136,7 @@ test('external operations execute after completion, bind the verified targets an
     await r.tick();f.check()
     assert.deepEqual(f.writes,[
       ['feeds/comment/reply',{feed_id:'post1',xsec_token:'private-handle',comment_id:'comment1',content:'谢谢分享'}],
-      ['publish',{title:'观察笔记',content:'今天读到一段游记。',images:raw.publishImages}],
+      ['fish/publish',{title:'观察笔记',content:'今天读到一段游记。',images:[{mime:'image/png',data}]}],
     ])
     assert.deepEqual(f.shares,[{dest:target,id:'post1'}])
     assert.deepEqual(r.recentActions().map(a=>a.status),['accepted','unknown','accepted'])
@@ -174,7 +181,7 @@ test('Native link sharing pins account and group, checks revocation at submissio
   assert.deepEqual(sent,['https://www.xiaohongshu.com/explore/post'])
 })
 
-test('daily action cap survives restart and blocks each new action once the limit is reached', async t=>{
+test('legacy action limits no longer prevent a new decision on a different notification', async t=>{
   const f=await runFixture(t,{overrides:{dailyActionLimit:1}})
   const r=f.open()
   try {await r.tick();f.check()}finally{await r.dispose()}
@@ -182,8 +189,8 @@ test('daily action cap survives restart and blocks each new action once the limi
   const second=f.open()
   try {
     await second.tick();f.check()
-    assert.equal(f.writes.length,2);assert.equal(f.shares.length,1)
-    assert.deepEqual(second.recentActions().slice(0,3).map(a=>a.status),['blocked','blocked','blocked'])
+    assert.equal(f.writes.length,4);assert.equal(f.shares.length,2)
+    assert.deepEqual(second.recentActions().slice(0,3).map(a=>a.status),['accepted','accepted','accepted'])
   }finally{await second.dispose()}
 })
 

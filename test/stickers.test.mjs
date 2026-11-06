@@ -51,7 +51,7 @@ test('authenticated Fish panel manages persistent reply images', async t => {
   }
   assert.deepEqual(await (await update({ action: 'delete' })).json(), [])
   assert.equal((await fetch(preview)).status, 404)
-  assert.deepEqual(await readdir(join(root, 'stickers')), ['index.json'])
+  assert.deepEqual(await readdir(join(root, 'gallery')), ['index.json'])
   const [replacement] = await (await post(upload)).json()
   assert.notEqual(replacement.id, item.id)
 })

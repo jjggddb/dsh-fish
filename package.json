@@ -1,6 +1,6 @@
 {
   "name": "dsh-fish",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "基于 dsh-fish 的单插件微信群二开：微信接入、会话编排、人格记忆与 DSH 工具授权",
   "type": "module",
   "main": "lib/index.js",
@@ -18,7 +18,9 @@
     "AGENTS.md",
     "CHANGELOG.md",
     "vendor",
-    "scripts/build-sdk.mjs"
+    "scripts/build-sdk.mjs",
+    "tools/xhs-gateway.mjs",
+    "docs/xhs-gateway.md"
   ],
   "scripts": {
     "test": "node --test",

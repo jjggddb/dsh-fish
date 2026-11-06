@@ -20,7 +20,7 @@ import { sayToHer, beginTurnWait } from '../lib/say.js'
 
 async function fixture(
   t,
-  { setup, reason = 'completed', action = 'reply', remember = true, media = false, beforeDecide, afterDecide, decision, beforeImage, awaiting = [], newerInput } = {},
+  { setup, policy, reason = 'completed', action = 'reply', remember = true, media = false, beforeDecide, afterDecide, decision, beforeImage, awaiting = [], newerInput } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'fish-group-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -135,7 +135,7 @@ async function fixture(
   registerCapture(ctx, { root, tenant: tenancy })
   registerRecall(ctx, { root, tenant: tenancy })
   await setup?.({ctx, native, root})
-  apply(ctx, { root, ready: Promise.resolve(), tenant: tenancy, native })
+  apply(ctx, { root, ready: Promise.resolve(), tenant: tenancy, native, policy })
   for (let i = 0; i < 20 && !handler; i++) await delay(1)
   t.after(async () => {
     for (const fn of cleanup.reverse()) await fn?.()
@@ -353,7 +353,7 @@ for (const text of ['', '太好笑了']) {
     assert.ok(!f.observed[0].includes(stickerData))
     assert.deepEqual(f.sent.map(part => part.text || part.image), text ? [text, true] : [true])
     assert.equal(f.sent.at(-1).id, msg.id)
-    assert.equal((await groupState(f.root)).groups[msg.threadId].lastReply.text, [text, '［表情：大笑］'].filter(Boolean).join(' '))
+    assert.equal((await groupState(f.root)).groups[msg.threadId].lastReply.text, [text, '［图库：大笑］'].filter(Boolean).join(' '))
   })
 }
 test('matching uses the live catalog after the reply decision', async t => {
@@ -768,4 +768,129 @@ test('removing a binding after the decision prevents the relationship @', async 
   await f.receive(m)
   assert.equal(f.sent.length,0)
   assert.equal((await groupState(f.root)).recent.at(-1).status,'send_blocked')
+})
+
+test('Fish saves an XHS photo, then days later finds it by its remark and shares it once with 二哥 in an ordinary group conversation', async t=>{
+  const {registerGallery}=await import('../lib/gallery-tools.js')
+  const {createXhs}=await import('../lib/xhs/index.js')
+  const {listGallery}=await import('../lib/gallery.js')
+  const accountId='fish-xhs', original=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l0cAAAAASUVORK5CYII=','base64')
+  const cfg={enabled:true,accountId,ownerId:'owner',dailyMinutes:30,allowedTypes:['image'],blockedWords:[]}
+  let decision,attachments=[],failure
+  const f=await fixture(t,{policy:()=>cfg,remember:false,decision:()=>decision,beforeDecide:async(_n,tools,exec)=>{
+    const turn=activeTurn(f.root,exec.agent.session.id)
+    const list=await tools.get('fish_gallery').execute({action:'search',query:'海豹 二哥'},exec)
+    const {galleryNo}=list.images[0]
+    assert.match(list.images[0].note,/打瞌睡/)
+    const card=await tools.get('fish_gallery').execute({action:'view',galleryNo},exec)
+    assert.ok(card.attachment)
+    const index=turn.book.cards.findIndex(p=>p.title==='二哥')+1
+    assert.ok(index);assert.equal(turn.book.call,false)
+    decision={action:'reply',text:'上回看到的，就是这只。',galleryNo,mentionContacts:[index]}
+  }})
+  const originalGet=f.ctx.get
+  f.ctx.get=n=>n==='llm'?{resolveModelInfo:async()=>({inputModalities:['image']})}
+    : n==='attachments'?{saveImage:async({data})=>{attachments.push(data);return {id:'att',mediaType:'image/png',bytes:data.length}}}:originalGet(n)
+  const scopeExec=id=>({agent:{options:{provider:'vision',model:'image'},session:{id,cwd:join(f.root,'home')}}})
+  // The group fixture uses a model route at the session level in production. Set the route for its tool callback.
+  const register=()=>registerGallery(f.ctx,{root:f.root,tenant:f.tenancy,policy:()=>cfg})
+  let off=register()
+  const gallery=f.tools.get('fish_gallery')
+  const real=gallery.execute
+  gallery.execute=(args,exec)=>real(args,{...exec,agent:{...exec.agent,options:{provider:'vision',model:'image'}}})
+  t.mock.timers.enable({apis:['Date'],now:new Date('2026-04-02T11:00:00+08:00')})
+  await writeConfig({tools:{allow:['xhs_read']}},f.root)
+  const request=async(url,opts)=>{
+    const body=opts.body&&JSON.parse(opts.body)
+    const result={
+      'login/status':{is_logged_in:true,user_id:accountId},
+      'notifications/list':{data:{tab:'mentions',items:[]}},
+      'feeds/list':{feeds:[{id:'seal',xsecToken:'signed',noteCard:{type:'image',displayTitle:'海豹'}}]},
+      'feeds/detail':{feed_id:'seal',data:{note:{type:'normal',noteId:'seal',title:'海豹',imageList:[{urlDefault:'https://cdn.xhscdn.com/seal',width:1,height:1}]}}},
+      'fish/media':{base64:original.toString('base64')},
+    }[url.pathname.slice('/api/v1/'.length)]
+    assert.ok(result)
+    if(url.pathname.endsWith('/fish/media'))assert.deepEqual(body,{url:'https://cdn.xhscdn.com/seal',kind:'image'})
+    return Response.json({success:true,data:result})
+  }
+  const xctx={...f.ctx,sessionController:{...f.ctx.sessionController,async prompt(req){
+    const exec=scopeExec(req.sessionId),emit=(type,data)=>fire({id:req.sessionId},{type,data:{turn:1,...data}})
+    const tool=(n,a)=>f.tools.get(n).execute(a,exec)
+    emit('turn/start',{});emit('user/message',{source:{rpcId:req.requestId}})
+    try{
+      assert.equal((await tool('xhs_read',{action:'home'})).notes[0].id,'seal')
+      const note=await tool('xhs_read',{action:'read',feedId:'seal'})
+      assert(!JSON.stringify(note).includes('xhscdn'))
+      const {seenImageNo,attachment}=await tool('xhs_read',{action:'image',feedId:'seal',imageNo:1})
+      assert.ok(attachment && seenImageNo)
+      await tool('fish_gallery',{action:'save',seenImageNo,note:'打瞌睡的海豹，二哥会喜欢'})
+    }catch(e){failure=e}
+    emit('turn/end',{reason:{kind:failure?'cancelled':'completed'}})
+  }}}
+  let fire
+  xctx.on=(_n,fn)=>{fire=fn;return ()=>{}}
+  const worker=createXhs(xctx,cfg,{root:f.root,allow:['xhs_read'],tenancy:f.tenancy,request})
+  try {await worker.tick()}catch(e){throw failure||e}finally{await worker.dispose()}
+  assert.equal(listGallery(f.root).length,1);assert.equal(f.sent.length,0)
+  // End the first session and replace even the gallery tool. Only disk survives into day four.
+  off();off=register()
+  const reopened=f.tools.get('fish_gallery'),execute=reopened.execute
+  reopened.execute=(args,exec)=>execute(args,{...exec,agent:{...exec.agent,options:{provider:'vision',model:'image'}}})
+  t.mock.timers.setTime(Date.parse('2026-04-05T12:00:00+08:00'))
+  const bro={id:'brother',name:'奇点',title:'二哥'}
+  f.native.store={relationships:()=>[bro],contactRemarks:()=>[]}
+  const member={username:bro.id,displayName:bro.name,mentionName:bro.name}
+  f.native.groupDirectory=async()=>new Map([[bro.id,member]])
+  f.native.member=async(_g,id)=>id===bro.id?member:null
+  const send=f.native.sendImage
+  f.native.sendImage=(id,bytes,opts)=>{assert.deepEqual(bytes,original);return send(id,bytes,opts)}
+  await f.receive({...f.message('day-four'),body:'这只海豹也太爱睡了'})
+  assert.deepEqual(attachments,[original,original])
+  assert.deepEqual(f.sent.map(r=>r.image?'image':r.text),['@奇点\u2005上回看到的，就是这只。','image'])
+  assert.deepEqual(f.sent[0].opts.mentions,[bro.id]);assert.deepEqual(f.sent.map(r=>r.id),['day-four','day-four'])
+  off()
+})
+
+test('a WeChat note link uses its original message and the same XHS time budget; cancelled turns never comment',async t=>{
+  const {createXhs}=await import('../lib/xhs/index.js')
+  const {DatabaseSync}=await import('node:sqlite')
+  for(const reason of ['completed','cancelled']){
+    const grants=['xhs_read','xhs_comment'], calls=[]
+    let worker
+    const f=await fixture(t,{remember:false,reason,setup:async({ctx,root})=>{
+      await writeConfig({tools:{allow:grants},group:{fastWindowMs:50,slowWindowMs:50}},root)
+      const request=async(url,opts)=>{
+        const path=url.pathname.slice('/api/v1/'.length),body=opts.body && JSON.parse(opts.body)
+        calls.push(path)
+        let data
+        if(path==='login/status')data={is_logged_in:true,user_id:'fish'}
+        else if(path==='fish/link'){
+          assert.equal(body.url,'https://xhslink.com/a/test')
+          data={feedId:'test',token:'private-note-handle'}
+        }else if(path==='feeds/detail'){
+          assert.equal(body.xsec_token,'private-note-handle')
+          data={feed_id:'test',data:{note:{type:'text',noteId:'test',title:'日记',desc:'正文'}}}
+        }else if(path==='feeds/comment')data={feed_id:'test',success:true}
+        else assert.fail(path)
+        return Response.json({success:true,data})
+      }
+      worker=createXhs(ctx,{enabled:true,accountId:'fish',ownerId:'owner',allowedTypes:['text'],dailyMinutes:2},
+        {root,allow:grants,tenancy:{root,tenant:{ok:true}},request})
+    },beforeDecide:async(_n,tools,exec)=>{
+      const call=(n,a)=>tools.get(n).execute(a,exec)
+      await assert.rejects(call('xhs_read',{action:'link',messageNo:9}),/没有/)
+      const result=await call('xhs_read',{action:'link',messageNo:1})
+      assert.equal(result.note.text,'正文');assert(!JSON.stringify(result).includes('private-note-handle'))
+      await call('xhs_comment',{feedId:'test',text:'我也喜欢。'})
+      assert(!calls.includes('feeds/comment'))
+    }})
+    const msg={...f.message('link'),body:'看到这篇了 https://xhslink.com/a/test'}
+    try {
+      if(reason==='completed')await f.receive(msg)
+      else await assert.rejects(f.receive(msg),/cancelled/)
+      assert.equal(calls.filter(p=>p==='feeds/comment').length,reason==='completed'?1:0)
+      const db=new DatabaseSync(join(scopeRoot(f.root,{scene:'xhs',accountId:'fish'}),'activity.sqlite'),{readOnly:true})
+      try{const used=db.prepare('SELECT ms FROM browsing_time').get().ms;assert(used>=0 && used<120000)}finally{db.close()}
+    }finally{await worker.dispose()}
+  }
 })
