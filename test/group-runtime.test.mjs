@@ -408,3 +408,19 @@ test('a hot burst shortens the first-message deadline; new messages never extend
   assert.deepEqual(batches,[['a','c']])
   await Promise.all([a,c]);await b.dispose()
 })
+
+test('a busy room can still interject after reconsidering its draft with a new message',async t=>{
+  let changed=false
+  const checks=[]
+  const f=await fixture(t,{remember:false,newerInput:(_g,ids,options)=>{
+    checks.push({ids,options})
+    // A different bystander keeps talking during both turns.
+    return changed && !options.peer
+  },beforeDecide:async()=>{changed=true}})
+  await f.receive(f.message('old'))
+  await f.receive(f.message('new'))
+  assert.deepEqual(f.sent.map(r=>r.id),['new'])
+  assert.match(f.observed[1],/草稿未发送/)
+  assert.doesNotMatch(f.observed[1],/这轮可能是直接提问/)
+  assert.ok(checks.some(c=>c.options.peer?.includes('person-old')))
+})
