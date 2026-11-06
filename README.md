@@ -38,6 +38,31 @@ dsh plugin --profile my-profile add git+https://github.com/jjggddb/dsh-fish.git#
 
 在「成长 → 人格关系 · 爸爸」按微信名称绑定或解除。Fish 根据当前消息的真实发件人识别爸爸。绑定只影响人格表达，不自动开放私聊或控制插件。
 
+## 小红书只读活动
+
+Fish 可以自己选择看首页、搜索、打开笔记或休息。主人在评论区真实 @ 鱼时，Fish 优先打开原帖，根据平台通知里的作者 ID、笔记 ID 和评论 ID 定位你的评论。读取范围是笔记可用的标题与正文；私信、公开回复、发布和视频理解留待后续版本。
+
+部分真实 @ 会被平台归入普通评论通知。对于这类通知，Fish 只处理来自主人 ID、开头点名当前登录鱼昵称的评论，还会在原帖详情中核对评论 ID、作者和点名文字。详情未返回目标评论时保留待核对。平台只提供纯文本时，Fish 无法区分手输同名和从 @ 候选中选中鱼。
+
+1. 单独运行支持通知列表和登录用户 ID 的 [xiaohongshu-mcp](https://github.com/xpzouying/xiaohongshu-mcp) 服务，为它登录鱼的专用账号。Fish 调用同一服务的只读 HTTP API。服务启用 Bearer 鉴权时，把凭据放在 DSH 宿主的 `FISH_XHS_TOKEN` 环境变量。
+2. 在 DSH profile 的 Fish 节点已有的 `config` 下添加：
+
+   ```yaml
+   xhs:
+     enabled: true
+     baseUrl: http://127.0.0.1:18060
+     accountId: YOUR_FISH_XHS_USER_ID
+     ownerId: YOUR_PERSONAL_XHS_USER_ID
+     intervalMs: 900000
+   ```
+
+   两个 ID 都取自对应账号的个人主页，按稳定用户 ID 配置。服务与 DSH 不在同一台机器或容器时，使用 DSH 可以访问的 HTTPS 地址。
+3. 重载 profile，在「大肥鱼 → DSH 工具授权」勾选 `xhs_read`，保存并重启 DSH Host。缺少授权时不会联网。登录身份与 `accountId` 不符时停止该次读取。
+
+默认每 15 分钟给 Fish 一次自主浏览机会，每两分钟检查最近可见的评论和 @ 通知并优先处理一条（可用活动时段遵循已开启的免打扰设置）。重启后继续处理已发现的待办。平台只返回当前可见的通知窗口；离线太久或通知已删除时无法保证补齐。工具调用与通知均无对外发送路径。
+
+Fish 自己决定是否记忆。记忆追加到 `events.jsonl`，来源绑定本轮实际读到的笔记或评论；下一轮可用 `her_recall` 检索。小红书账号与微信群、微信私聊各自隔离。通知处理记录保存在 `root/xhs/` 下，迁移时停服备份该目录。
+
 ## 工具与记忆
 
 在「DSH 工具授权」中勾选宿主已注册的工具，保存并重启 DSH Host 生效。默认授权 `web_search` 和 `web_fetch`。
