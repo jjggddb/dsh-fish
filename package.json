@@ -1,6 +1,6 @@
 {
   "name": "dsh-fish",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "基于 dsh-fish 的单插件微信群二开：微信接入、会话编排、人格记忆与 DSH 工具授权",
   "type": "module",
   "main": "lib/index.js",

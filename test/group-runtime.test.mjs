@@ -39,6 +39,7 @@ async function fixture(
     observed = []
   const tenancy = { root, herDir: join(root, 'home'), tenant: { ok: true } }
   const native = {
+    scene: (id) => id.endsWith('@chatroom') ? 'group' : 'private',
     identity: () => ({ accountId: 'account-test', selfId: 'bot' }),
     subscribe(fn) {
       handler = fn
@@ -362,4 +363,21 @@ test('silent decision discards staged image as well as text', async (t) => {
   const f = await fixture(t, { media: true, action: 'silent' })
   await f.receive(f.message('image-source'))
   assert.equal(f.sent.length, 0)
+})
+
+test('a private chat reaches its own DSH session, remembers its peer and replies via the source message', async (t) => {
+  const f = await fixture(t)
+  await f.receive({ ...f.message('dm-one', 'friend'), senderId: 'friend' })
+  const [room] = await readChannels(f.root)
+  assert.equal(room.scene, 'private')
+  assert.equal(room.key, 'wechat-private:friend')
+  assert.match(f.observed[0], /微信私聊/)
+  const memory = (await readEvents(f.root)).events.find((e) => e.type === 'utterance')
+  assert.equal(memory.scene, 'private')
+  assert.equal(memory.personId, 'friend')
+  assert.equal(memory.groupId, undefined)
+  assert.equal(f.sent[0].id, 'dm-one')
+  await f.receive({ ...f.message('dm-two', 'other'), senderId: 'other' })
+  assert.equal((await readChannels(f.root)).length, 2)
+  assert.doesNotMatch(f.observed.at(-1), /dm-one/)
 })

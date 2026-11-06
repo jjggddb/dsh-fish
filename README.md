@@ -29,11 +29,11 @@ dsh plugin --profile my-profile add git+https://github.com/jjggddb/dsh-fish.git#
       sending: false
 ```
 
-重载 profile，在「大肥鱼」设置页核对连接、账号和授权群。将 `sending` 改为 `true` 并重载，即可向群里回复。跨容器连接 Native 时使用 HTTPS。
+重载 profile，打开「大肥鱼 → 微信」。未登录时可扫码登录。微信群和私聊联系人都可逐条添加、检测或删除，勾选「允许发送回复」后保存即可生效。首次使用 profile 中的名单，此后以面板保存的设置为准。跨容器连接 Native 时使用 HTTPS。
 
 ## 工具与记忆
 
-在「DSH 工具授权」中勾选宿主已注册的工具，保存并重启 DSH Host 生效。默认授权 `web_search` 和 `web_fetch`。如需定时主动发言，同时开启 `wechat.scheduledSending` 和 Fish 运行配置的 `proactive.enabled`。
+在「DSH 工具授权」中勾选宿主已注册的工具，保存并重启 DSH Host 生效。默认授权 `web_search` 和 `web_fetch`。如需定时主动发言，在「微信」页同时开启定时观察和定时发送。
 
 `root` 保存人格、记忆和群会话，`dataDir` 保存微信消息队列、游标和发送记录。两者都应使用持久目录。
 
