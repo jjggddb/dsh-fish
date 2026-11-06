@@ -41,5 +41,6 @@ instance.json
 notes.json
 diary/
 groups/
+contacts/
 backups/
 *.sqlite*
