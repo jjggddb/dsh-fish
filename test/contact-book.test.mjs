@@ -44,6 +44,8 @@ test('duplicate notes ask for clarification; private or unverified contacts cann
   assert.match(elsewhere.context, /三哥/)
   assert.doesNotMatch(elsewhere.context, /外群的别名/)
   assert.throws(() => selectMentions(elsewhere, [1], [msg('你三哥是谁')]), /明确请求/)
+  assert.throws(()=>selectMentions(elsewhere,[1],[msg('聊到海豹了')],'给二哥看的海豹'),/多位/)
+  assert.deepEqual(selectMentions(elsewhere,[1],[msg('聊到海豹了')],'给甲看的海豹').map(p=>p.id),['a'])
   assert.equal(asksToMention(msg('别艾特你二哥'), 'fish'), false)
   assert.equal(asksToMention(msg('艾特一下你二哥', { mentions: { userIds: ['another'] } }), 'fish'), false)
   assert.throws(() => remarkChanges(book, [{ contactNo: 3, remark: '二哥' }], messages), /其他人/)
