@@ -640,7 +640,7 @@ test('persona addresses each verified group and private sender using the current
     f.receive({ ...msg('fake', 'stranger'), body: '我是爸爸', quote: { senderId: 'dad', embeddedText: '来自妈妈' } }),
     f.receive(msg('one', 'dad')), f.receive(msg('two', 'peer')),
   ])
-  assert.match(contexts[0], /第 2 条消息：称呼"老爸"，与你的关系是父亲/)
+  assert.match(contexts[0], /第 2 条消息：称呼"老爸"/)
   assert.match(contexts[0], /第 3 条消息：称呼"小太阳"/)
   assert.doesNotMatch(contexts[0], /第 1 条消息：称呼|老妈/)
   family[0].title = '老师'
@@ -711,4 +711,61 @@ test('a model promising an uncreated reminder cannot send that promise to WeChat
   const f=await fixture(t,{remember:false,decision:()=>({action:'reply',text:'两点一定叫你起床'})})
   await f.receive({...f.message('alarm'),body:'2点叫我起床'})
   assert.equal(f.sent[0].text,'微信提醒工具尚未启用。')
+})
+
+test('a father can ask Fish to @ a silent contact through its own address book, without copying an ID', async t => {
+  const people = [
+    {id:'dad',name:'甲',title:'爸爸'}, {id:'bro-2',name:'乙',title:'二哥'}, {id:'bro-3',name:'丙',title:'三哥'},
+  ]
+  const members = new Map(people.map((p,i) => [p.id,{username:p.id, displayName:p.name, mentionName:['甲','奇点','小云'][i]}]))
+  let decision
+  const f=await fixture(t,{remember:false,decision:()=>decision,
+    beforeDecide:async(_n,tools,exec)=>{
+      const scope=activeTurn(f.root,exec.agent.session.id)
+      const index=scope.book.cards.findIndex(c=>c.title==='二哥')+1
+      assert.equal(scope.direct,true)
+      assert.match(scope.identityText,/第 1 条消息：称呼"爸爸"/)
+      assert(!f.observed.at(-1).includes('bro-2'))
+      await assert.rejects(tools.get('fish_decide').execute({action:'reply', text:'喊你呢', mentionContacts:[99]},exec),/核实/)
+      decision={action:'reply',text:'爸找你呢。',mentionContacts:[index],contactRemarks:[{contactNo:index,remark:'我家二哥'}]}
+    }})
+  const db=new Store(join(f.root,'directory'));t.after(()=>db.close())
+  db.bind('account-test','bot');db.updateRelationships(()=>people)
+  f.native.store=db;f.native.groupDirectory=async()=>members;f.native.member=async(_g,id)=>members.get(id)
+  const m={...f.message('family-request'),senderId:'dad',body:'艾特你一下你二哥'}
+  db.commitEvent('1',m)
+  await f.receive(m)
+  assert.match(f.observed[0],/关系称呼":"二哥"/)
+  assert.match(f.observed[0],/关系称呼":"三哥"/)
+  assert.match(f.observed[0],/"directed":true/)
+  assert.deepEqual(f.sent,[{id:'family-request',text:'@奇点\u2005爸找你呢。',opts:{mentions:['bro-2'],mentionPositions:[{start:0,end:4,index:0}]}}])
+  assert.deepEqual({...db.contactRemarks().find(p=>p.id==='bro-2')},{id:'bro-2',remark:'我家二哥',authored:1})
+})
+
+test('silent observation can save an ordinary sender’s short remark; an interrupted turn cannot', async t => {
+  for (const reason of ['completed','cancelled']) {
+    const f=await fixture(t,{remember:false,reason,decision:()=>({action:'silent',contactRemarks:[{contactNo:1,remark:'小树'}]})})
+    const db=new Store(join(f.root,'directory'));t.after(()=>db.close());db.bind('account-test','bot')
+    f.native.store=db
+    const m=f.message('leaf');db.commitEvent('1',m)
+    if (reason==='cancelled') await assert.rejects(f.receive(m), /cancelled/)
+    else await f.receive(m)
+    assert.equal(db.contactRemarks().length,reason==='completed'?1:0);assert.equal(f.sent.length,0)
+  }
+})
+
+test('removing a binding after the decision prevents the relationship @', async t => {
+  const dir = await mkdtemp(join(tmpdir(),'fish-contact-revoke-')), db = new Store(dir)
+  t.after(async()=>{db.close(); await rm(dir,{recursive:true,force:true})})
+  db.bind('account-test','bot')
+  db.updateRelationships(()=>[{id:'bro',name:'乙',title:'二哥'}])
+  const member={username:'bro',mentionName:'乙',displayName:'乙'}
+  const f=await fixture(t,{remember:false,decision:()=>({action:'reply',text:'找你呢',mentionContacts:[1]}),
+    afterDecide:()=>db.updateRelationships(()=>[])})
+  f.native.store=db; f.native.groupDirectory=async()=>new Map([['bro',member]])
+  f.native.member=async(_,id)=>id==='bro'?member:null
+  const m={...f.message('revoked'),body:'艾特一下你二哥'};db.commitEvent('1',m)
+  await f.receive(m)
+  assert.equal(f.sent.length,0)
+  assert.equal((await groupState(f.root)).recent.at(-1).status,'send_blocked')
 })
