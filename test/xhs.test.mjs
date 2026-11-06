@@ -40,7 +40,7 @@ test('Fish entry point browses, remembers, then locates the owner comment after 
       case '/api/v1/feeds/list':
       case '/api/v1/feeds/search':
         if (path.endsWith('search')) assert.deepEqual(JSON.parse(body), { keyword: '阴天' })
-        data = { feeds: [{ id: 'note-1', xsecToken: mention.feed_xsec_token, noteCard: { displayTitle: '梅雨' } }] }; break
+        data = { feeds: [{ id: 'note-1', xsecToken: mention.feed_xsec_token, noteCard: { type: 'normal', displayTitle: '梅雨' } }] }; break
       case '/api/v1/feeds/detail':
         assert.deepEqual(JSON.parse(body), { feed_id: 'note-1', xsec_token: mention.feed_xsec_token })
         data = detail; break
