@@ -104,29 +104,6 @@ test('second consumer is rejected and unsubscribed messages remain durable',asyn
   assert.throws(()=>f.transport.subscribe(async()=>{}),/one response consumer/)
   off();const m=f.message();await f.transport.ingest(f.event(m));assert.equal(f.store.next().id,m.id)
 })
-test('scheduled sends require host capability, explicit setting and exact authorized group',async t=>{
- const f=fixture(t);await f.transport.verify()
- await assert.rejects(f.transport.beginScheduledTurn('123@chatroom','timer:1'),/not authorized/)
- f.config.scheduledSending=true
- await assert.rejects(f.transport.beginScheduledTurn('456@chatroom','timer:1'),/not authorized/)
- await assert.rejects(f.transport.sendScheduledText({},'hello'),/expired/)
- const handle=await f.transport.beginScheduledTurn('123@chatroom','timer:1')
- const first=await f.transport.sendScheduledText(handle,'hello')
- const again=await f.transport.sendScheduledText(handle,'hello')
- assert.equal(first.id,again.id);assert.equal(f.submitted(),1)
- await assert.rejects(f.transport.sendScheduledText(handle,'changed'),/different payload/)
- f.transport.endScheduledTurn(handle)
- await assert.rejects(f.transport.sendScheduledText(handle,'hello'),/expired/)
- const resumed=await f.transport.beginScheduledTurn('123@chatroom','timer:1')
- assert.equal((await f.transport.sendScheduledText(resumed,'hello')).id,first.id);assert.equal(f.submitted(),1)
-})
-test('scheduled capabilities expire and sending shutdown wins before submission',async t=>{
- const f=fixture(t);f.config.scheduledSending=true;await f.transport.verify()
- const expired=await f.transport.beginScheduledTurn('123@chatroom','timer:2');f.transport.scheduled.get(expired).expires=0
- await assert.rejects(f.transport.sendScheduledText(expired,'hello'),/expired/)
- const handle=await f.transport.beginScheduledTurn('123@chatroom','timer:3');f.transport.setSending(false)
- await assert.rejects(f.transport.sendScheduledText(handle,'hello'),/disabled/);assert.equal(f.submitted(),0)
-})
 test('bounded concurrent delivery lets Fish merge messages but only acknowledges completed consumers',async t=>{
  const f=fixture(t);await f.transport.verify()
  for(let i=1;i<=20;i++){const m=f.message('m'+i);await f.transport.ingest(f.event(m,String(i)))}
@@ -147,4 +124,15 @@ test('a new mention reaches Fish while sixteen ordinary inbox callbacks are stil
    for(let i=0;i<30&&!seen.includes('direct');i++)await delay(5)
    assert.ok(seen.includes('direct'))
  } finally {release();await f.transport.draining}
+})
+test('new input between preparing a reply and submission prevents the external send',async t=>{
+ const f=fixture(t);await f.transport.verify()
+ const first=f.message('question');await f.transport.ingest(f.event(first,'1'))
+ const lookup=f.client.sendByKey
+ f.client.sendByKey=async(...args)=>{
+   const newer=f.message('clarification');await f.transport.ingest(f.event(newer,'2'))
+   return lookup(...args)
+ }
+ await assert.rejects(f.transport.sendText(first.id,'obsolete',{beforeSubmit:()=>!f.transport.newerInput(first.threadId,[first.id],{pendingOnly:true})}),e=>e.code==='STALE_REPLY')
+ assert.equal(f.submitted(),0)
 })

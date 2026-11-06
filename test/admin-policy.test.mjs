@@ -190,7 +190,7 @@ test('configuration keeps explicit external tool grants without reviving removed
   assert.deepEqual(c.tools.allow, ['weather_lookup', 'web_search'])
   assert.equal(c.tools.restrict, true)
   assert.equal(c.browse, undefined)
-  assert.equal(c.proactive.baseChance, undefined)
+  assert.equal(c.proactive, undefined)
 })
 test('a long existing persona seed remains intact even with a small memory budget', () => {
   const seed = '已有的人格起点。'.repeat(600)

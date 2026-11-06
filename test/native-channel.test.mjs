@@ -13,3 +13,7 @@ test('quiet hours remain China midnight to 08:00',()=>{
   assert.equal(quietAt(new Date('2026-11-05T23:59:00Z')),true)
   assert.equal(quietAt(new Date('2026-11-06T00:00:00Z')),false)
 })
+test('mentioning Fish in a story is ambient; addressing Fish by name is direct',()=>{
+ assert.equal(directedAtFish({threadId:'123@chatroom',body:'昨天大肥鱼说过这件事'},'bot'),false)
+ assert.equal(directedAtFish({threadId:'123@chatroom',body:'请问大肥鱼，哪个好？'},'bot'),true)
+})

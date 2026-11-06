@@ -57,7 +57,7 @@ test('one Fish plugin receives Native SSE, prompts DSH and sends only the comple
   previous.bind(message.accountId, 'bot')
   previous.commitEvent('7', null)
   previous.close()
-  await writeConfig({ group: { quietHours: [0, 0], batchMs: 50 } }, root)
+  await writeConfig({ group: { quietHours: [0, 0], fastWindowMs:50, slowWindowMs:50 } }, root)
   const tools = new Map(), listeners = new Map(), cleanup = []
   let prompts = 0
   const ctx = {

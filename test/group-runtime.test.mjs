@@ -11,18 +11,17 @@ import { appendEvent, readEvents, writeConfig } from '../lib/store.js'
 import { bindTurn, visibleEvents, scopeRoot } from '../lib/scope.js'
 import { identityFor } from '../lib/selfdoc.js'
 import { addExchange, recentExchanges } from '../lib/talkmem.js'
-import { reserveTurn, groupState } from '../lib/group-state.js'
-import { normalizeConfig } from '../lib/settings.js'
+import { groupState } from '../lib/group-state.js'
 import { readChannels } from '../lib/channels.js'
 import { sayToHer, beginTurnWait } from '../lib/say.js'
 
 async function fixture(
   t,
-  { reason = 'completed', action = 'reply', remember = true, media = false } = {},
+  { reason = 'completed', action = 'reply', remember = true, media = false, beforeDecide, awaiting = [], newerInput } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'fish-group-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  await writeConfig({ group: { batchMs: 50, quietHours: [0, 0] }, chat: { rotateAfter: 5 } }, root)
+  await writeConfig({ group: { fastWindowMs: 50, slowWindowMs:50, quietHours: [0, 0] }, chat: { rotateAfter: 5 } }, root)
   await appendEvent(
     { type: 'seed', text: '大肥鱼喜欢白饭，有自己的想法。' },
     { source: 'system', day: 1, stage: 1 },
@@ -46,18 +45,14 @@ async function fixture(
       return () => (handler = null)
     },
     member: async (g, u) => ({ mentionName: u, displayName: u }),
-    recent: () => [],
+    recent: () => [], newerInput,
     sendText: async (id, text, opts) => {
-      sent.push({ id, text, opts })
+      const {beforeSubmit,...options}=opts
+      if(beforeSubmit && !beforeSubmit())throw Object.assign(Error('New input'),{code:'STALE_REPLY'})
+      sent.push({ id, text, opts:options })
       return { state: 'accepted', id: 'receipt' }
     },
     authorizedGroups: () => [{ id: 'room@chatroom' }],
-    beginScheduledTurn: async (groupId, turnId) => ({ groupId, turnId }),
-    endScheduledTurn: () => {},
-    sendScheduledText: async (handle, text) => {
-      sent.push({ scheduled: true, handle, text })
-      return { state: 'accepted', id: 'timer-receipt' }
-    },
     readImage: async () => ({
       data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l0cAAAAASUVORK5CYII=',
       mimeType: 'image/png',
@@ -102,6 +97,7 @@ async function fixture(
           agent: { session: { id: req.sessionId, header: { cwd: join(root, 'home') } } },
         }
         observed.push(req.content[0].text)
+        if(beforeDecide)await beforeDecide(turn)
         if (remember) {
           const written = await tools
             .get('growth_commit')
@@ -112,7 +108,7 @@ async function fixture(
           await tools.get('wechat_send_image').execute({ sourceMessageId: 'image-source' }, exec)
         await tools
           .get('fish_decide')
-          .execute({ action, text: action === 'reply' ? '白饭来啦。' : '' }, exec)
+          .execute({ action, awaitingReplyFrom:awaiting, text: action === 'reply' ? '白饭来啦。' : '' }, exec)
         emit('assistant/message', {
           message: {
             content: [
@@ -274,20 +270,6 @@ test('specific sourceMessageId records a verified stable person, not a nickname 
     release()
   }
 })
-test('timer quotas are durable, deterministic, and reserve before inference', async (t) => {
-  const f = await fixture(t),
-    config = normalizeConfig({
-      proactive: { enabled: true, maxPerDay: 1, intervalMinutes: 15 },
-      group: { quietHours: [0, 0] },
-    }),
-    now = Date.now()
-  assert.equal(await reserveTurn(f.root, 'group', config, { scheduled: true, now }), true)
-  assert.equal(
-    await reserveTurn(f.root, 'group', config, { scheduled: true, now: now + 3600000 }),
-    false,
-  )
-  assert.equal((await groupState(f.root)).groups.group.proactiveCount, 1)
-})
 test('batcher serializes each group while independent groups may progress', async () => {
   let finish
   const gate = new Promise((r) => (finish = r)),
@@ -332,25 +314,13 @@ test('timeout and unrelated end events cannot complete an observation', async ()
   assert.equal((await w.wait()).reason, 'timeout')
 })
 
-test('scheduled observation reaches only the host-issued target and does not repeat inside its interval', async (t) => {
-  t.mock.timers.enable({ apis: ['setInterval'] })
-  const f = await fixture(t, { remember: false })
-  await writeConfig(
-    {
-      group: { quietHours: [0, 0] },
-      proactive: { enabled: true, intervalMinutes: 15, maxPerDay: 2 },
-    },
-    f.root,
-  )
-  t.mock.timers.tick(60000)
-  for (let i = 0; i < 100 && !f.sent.length; i++) await delay(5)
-  assert.equal(f.sent.length, 1)
-  assert.equal(f.sent[0].scheduled, true)
-  assert.equal(f.sent[0].handle.groupId, 'room@chatroom')
-  assert.match(f.observed[0], /没有人刚刚对你说话/)
-  t.mock.timers.tick(60000)
-  await delay(20)
-  assert.equal(f.sent.length, 1)
+test('an old active timer configuration cannot wake an idle conversation',async t=>{
+  t.mock.timers.enable({apis:['setInterval']})
+  const f=await fixture(t)
+  await writeConfig({proactive:{enabled:true,maxPerDay:5}},f.root)
+  t.mock.timers.tick(86400000)
+  await delay(5)
+  assert.equal(f.observed.length,0);assert.equal(f.sent.length,0)
 })
 test('existing group image can be staged and sent only after successful reply decision', async (t) => {
   const f = await fixture(t, { media: true })
@@ -394,17 +364,47 @@ test('direct windows overtake waiting ordinary windows but never interrupt the c
   release();await Promise.all([active,casual,first,second]);await batch.dispose()
   assert.deepEqual(seen,['active','direct1','direct2','ordinary'])
 })
-test('exhausted observation budget still admits real mentions and replies to Fish',async(t)=>{
+test('ordinary inputs are observed even after legacy limits; direct inputs close a pending window',async t=>{
   const f=await fixture(t,{remember:false})
-  await writeConfig({group:{quietHours:[0,0],batchMs:50,maxTurnsPerHour:1,maxDirectTurnsPerHour:2,maxRepliesPerMinute:4}},f.root)
-  await f.receive(f.message('one'))
-  await f.receive(f.message('two'))
+  await writeConfig({group:{maxTurnsPerHour:1,maxDirectTurnsPerHour:1,maxRepliesPerMinute:6}},f.root)
+  await f.receive(f.message('one'));await f.receive(f.message('two'))
   const mention=f.message('mention');mention.mentions.self=true
-  const ambient=f.message('trailing')
-  await Promise.all([f.receive(mention),f.receive(ambient)])
-  const quote=f.message('quote');quote.quote={senderId:'bot'}
-  await f.receive(quote)
-  await f.receive({...mention,id:'limit'})
-  assert.deepEqual(f.sent.map(r=>r.id),['one','mention','quote'])
-  assert.deepEqual((await groupState(f.root)).recent.map(x=>x.status),['accepted','turn_budget','accepted','accepted','direct_budget'])
+  await Promise.all([f.receive(f.message('casual')),f.receive(mention)])
+  await f.receive({...mention,id:'another'})
+  assert.deepEqual(f.sent.map(r=>r.id),['one','two','mention','another'])
+  assert.doesNotMatch(f.observed[1],/person-one|前一段对话/)
+})
+
+test('newer input withdraws a direct draft and reconsiders the original question with the correction',async t=>{
+  let unblock,started,changed=false
+  const gate=new Promise(r=>unblock=r), ready=new Promise(r=>started=r)
+  const f=await fixture(t,{remember:false,newerInput:(_g,ids)=>changed && ids.includes('original'),
+    beforeDecide:async turn=>{if(turn===1){started();await gate}}})
+  const ask={...f.message('original'),body:'大肥鱼，你觉得蓝色如何？',senderId:'p'}
+  const initial=f.receive(ask);await ready
+  changed=true
+  const next=f.receive({...f.message('correction'),senderId:'p',body:'我改选红色了'})
+  unblock();await Promise.all([initial,next])
+  assert.deepEqual(f.sent.map(s=>s.id),['correction'])
+  assert.match(f.observed[1],/草稿未发送/);assert.match(f.observed[1],/我改选红色了/)
+  assert.deepEqual((await groupState(f.root)).recent.map(s=>s.status),['superseded','accepted'])
+})
+test('an answer to Fish without a mention carries the actual last reply and its intended recipient',async t=>{
+  const f=await fixture(t,{remember:false,awaiting:['p']})
+  await f.receive({...f.message('first'),senderId:'p',mentions:{self:true}})
+  await f.receive({...f.message('second'),senderId:'p',body:'蓝色那个'})
+  assert.match(f.observed[1],/最近一次微信已接受的发言.*白饭来啦/)
+  assert.match(f.observed[1],/接你的话/)
+  assert.doesNotMatch(f.observed[1],/person-first|前一段对话/)
+})
+test('a hot burst shortens the first-message deadline; new messages never extend it',async t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:1000000})
+  const batches=[]
+  const b=createBatcher((_g,ms)=>batches.push(ms.map(m=>m.id)),{})
+  const push=id=>b.push({id,threadId:'room',createdAt:new Date().toISOString()})
+  const a=push('a');t.mock.timers.tick(5000);await Promise.resolve()
+  assert.equal(batches.length,0)
+  const c=push('c');t.mock.timers.tick(1);await Promise.resolve()
+  assert.deepEqual(batches,[['a','c']])
+  await Promise.all([a,c]);await b.dispose()
 })
