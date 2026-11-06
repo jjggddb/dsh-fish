@@ -8,7 +8,7 @@
 
 ## 内置微信传输
 
-`lib/wechat/transport.js`、`store.js` 和对应测试移植自原项目 `jjggddb/dsh-wechat-native`，基于 0.3.0 的本地提交 `96ab9957c1caa2cf1e6deaa96fe83ba4171cb2bd`。MIT 许可保存在 [vendor/dsh-wechat-native/LICENSE](vendor/dsh-wechat-native/LICENSE)。Fish 自行管理其配置与生命周期，不再依赖独立插件服务。
+Fish 将微信消息队列与收发逻辑维护在 `lib/wechat/`。其中沿用的传输代码与对应测试采用 MIT 许可，版权声明为 `Copyright (c) 2026 jjggddb and contributors`。[微信传输许可证](vendor/wechat-transport/LICENSE)
 
 ## agent-wechat HTTP SDK
 

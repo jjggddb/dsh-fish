@@ -2,7 +2,7 @@
 
 基于 [ssamurias/dsh-fish](https://github.com/ssamurias/dsh-fish) 二次开发。大肥鱼在微信里聊天，也会逛小红书、收藏图片，或把过几天想起来的图分享给熟人。各群共享同一个人格起点，具体经历和会话按账号与群隔离。
 
-**DSH 只需安装 Fish 一个业务插件。** 微信群消息经 [agent-wechat Native](https://github.com/thisnick/agent-wechat) 的 HTTP/SSE 接口进入 Fish。Fish 合并同群消息，附上人格与记忆，交给 [DSH Agent](https://github.com/deepseek-ai/deepseek-harness) 推理。DSH 按授权执行工具；回合成功完成且 Agent 选择回复时，Fish 通过 Native 发回原群。
+**DSH 只需安装 Fish 一个业务插件。** Fish 内置微信接入，连接独立运行的微信协议服务 [agent-wechat Native](https://github.com/thisnick/agent-wechat)。群消息经 HTTP/SSE 进入 Fish。Fish 合并同群消息，附上人格与记忆，交给 [DSH Agent](https://github.com/deepseek-ai/deepseek-harness) 推理。DSH 按授权执行工具，回合成功完成且 Agent 选择回复时，Fish 通过 Native 发回原群。
 
 ## 安装
 
@@ -65,7 +65,5 @@ Fish 自己选择浏览首页、搜索、打开群友分享的笔记或休息。
 在「DSH 工具授权」中勾选宿主已注册的工具，保存并重启 DSH Host 生效。默认授权 `web_search` 和 `web_fetch`。
 
 `root` 保存人格、记忆和群会话，`dataDir` 保存微信消息队列、游标和发送记录。两者都应使用持久目录。
-
-**从双插件升级**时，先停服，备份上述两个目录。将旧 `dsh-wechat-native` 的配置移到 Fish 的 `config.wechat`，移除旧插件及 `config.nativeChannel`，沿用原来的 `root` 和 `dataDir` 后重启。旧插件默认传输目录是 `$DSH_HOME/storages/dsh-wechat-native`，迁移时请显式填写其绝对路径。
 
 开发检查运行 `node --test`。项目采用 [MIT 许可](LICENSE)，SDK 来源见[第三方声明](THIRD-PARTY-NOTICES.md)。
