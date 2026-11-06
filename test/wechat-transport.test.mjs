@@ -77,6 +77,24 @@ test('image retries retain uploaded source and verify destination receipts',asyn
   f.client.sendText=async()=>({id:'evil',accountId:f.config.accountId,destination:'456@chatroom',state:'accepted'})
   await assert.rejects(f.transport.sendText(m.id,'hello'),/Receipt identity/)
 })
+test('a revoked image after upload blocks the Native submission and preserves the reason', async t => {
+  const f = fixture(t)
+  await f.transport.verify()
+  const m = f.message()
+  await f.transport.ingest(f.event(m))
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l0cAAAAASUVORK5CYII=', 'base64')
+  const upload = f.client.upload
+  let uploads = 0
+  f.client.upload = async (...args) => {
+    uploads++
+    return upload(...args)
+  }
+  await assert.rejects(f.transport.sendImage(m.id, png, {
+    beforeSubmit: () => { throw Object.assign(Error('disabled'), { code: 'SEND_BLOCKED' }) },
+  }), e => e.code === 'SEND_BLOCKED')
+  assert.equal(uploads, 1)
+  assert.equal(f.submitted(), 0)
+})
 test('pending state persists, interrupted work is not automatically replayed, account binding is enforced',async t=>{
   const f=fixture(t);await f.transport.verify();const m=f.message();await f.transport.ingest(f.event(m,'90071992547409930'));f.store.mark(m.id,'processing')
   const reopened=new Store(f.dir);try{assert.equal(reopened.cursor(),'90071992547409930');assert.equal(reopened.next(),undefined);assert.deepEqual(reopened.stats(),{interrupted:1});assert.throws(()=>reopened.bind('other','bot'),/different account/)}finally{reopened.close()}

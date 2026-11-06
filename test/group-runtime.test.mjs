@@ -4,6 +4,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { changeSticker } from '../lib/stickers.js'
 import { apply, createBatcher, cleanMessage } from '../lib/native-channel.js'
 import { registerCapture } from '../lib/capture.js'
 import { registerRecall } from '../lib/recall.js'
@@ -17,7 +18,7 @@ import { sayToHer, beginTurnWait } from '../lib/say.js'
 
 async function fixture(
   t,
-  { reason = 'completed', action = 'reply', remember = true, media = false, beforeDecide, awaiting = [], newerInput } = {},
+  { reason = 'completed', action = 'reply', remember = true, media = false, beforeDecide, decision, beforeImage, awaiting = [], newerInput } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'fish-group-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -57,7 +58,9 @@ async function fixture(
       data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l0cAAAAASUVORK5CYII=',
       mimeType: 'image/png',
     }),
-    sendImage: async (id, bytes) => {
+    sendImage: async (id, bytes, { beforeSubmit }) => {
+      await beforeImage?.()
+      if (!beforeSubmit()) throw Object.assign(Error('New input'), { code: 'STALE_REPLY' })
       sent.push({ image: true, id, bytes: bytes.length })
       return { state: 'accepted', id: 'image-receipt' }
     },
@@ -97,7 +100,7 @@ async function fixture(
           agent: { session: { id: req.sessionId, header: { cwd: join(root, 'home') } } },
         }
         observed.push(req.content[0].text)
-        if(beforeDecide)await beforeDecide(turn)
+        if(beforeDecide)await beforeDecide(turn, tools, exec)
         if (remember) {
           const written = await tools
             .get('growth_commit')
@@ -108,7 +111,7 @@ async function fixture(
           await tools.get('wechat_send_image').execute({ sourceMessageId: 'image-source' }, exec)
         await tools
           .get('fish_decide')
-          .execute({ action, awaitingReplyFrom:awaiting, text: action === 'reply' ? '白饭来啦。' : '' }, exec)
+          .execute(decision ? decision() : { action, awaitingReplyFrom:awaiting, text: action === 'reply' ? '白饭来啦。' : '' }, exec)
         emit('assistant/message', {
           message: {
             content: [
@@ -328,6 +331,65 @@ test('existing group image can be staged and sent only after successful reply de
   assert.equal(f.sent.length, 2)
   assert.equal(f.sent[1].image, true)
   assert.equal(f.sent[1].id, 'image-source')
+})
+const stickerData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l0cAAAAASUVORK5CYII='
+for (const text of ['', '太好笑了']) {
+  test('catalog selection replies to the source with ' + (text ? 'text and image' : 'only an image'), async t => {
+    let sticker
+    const f = await fixture(t, { remember: false, decision: () => ({ action: 'reply', stickerId: sticker.id, text }) })
+    sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '大笑' }))[0]
+    const msg = f.message('laugh', text ? 'room@chatroom' : 'contact')
+    await f.receive(msg)
+    assert.match(f.observed[0], /大笑/)
+    assert.ok(f.observed[0].includes(sticker.id))
+    assert.ok(!f.observed[0].includes(stickerData))
+    assert.deepEqual(f.sent.map(part => part.text || part.image), text ? [text, true] : [true])
+    assert.equal(f.sent.at(-1).id, msg.id)
+    assert.equal((await groupState(f.root)).groups[msg.threadId].lastReply.text, [text, '［表情：大笑］'].filter(Boolean).join(' '))
+  })
+}
+for (const action of ['toggle', 'delete']) {
+  test(action + ' after an agent choice blocks image submission', async t => {
+    let sticker
+    const f = await fixture(t, {
+      remember: false, decision: () => ({ action: 'reply', stickerId: sticker.id }),
+      beforeImage: () => changeSticker(f.root, { action, enabled: false, id: sticker.id }),
+    })
+    sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '无奈' }))[0]
+    await f.receive(f.message('revoked'))
+    assert.deepEqual(f.sent, [])
+    assert.equal((await groupState(f.root)).recent.at(-1).status, 'send_blocked')
+  })
+}
+test('disabled images are excluded from the prompt and rejected if supplied by ID', async t => {
+  let sticker
+  const f = await fixture(t, { remember: false, action: 'silent',
+    beforeDecide: async (_turn, tools, exec) => {
+      await assert.rejects(tools.get('fish_decide').execute({ action: 'reply', stickerId: sticker.id }, exec), /available sticker/)
+    },
+  })
+  sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '大笑' }))[0]
+  await changeSticker(f.root, { action: 'toggle', id: sticker.id, enabled: false })
+  await f.receive(f.message('disabled'))
+  assert.ok(!f.observed[0].includes(sticker.id))
+  assert.deepEqual(f.sent, [])
+})
+test('cancelled turn discards selected sticker', async t => {
+  let sticker
+  const f = await fixture(t, { reason: 'cancelled', remember: false, decision: () => ({ action: 'reply', stickerId: sticker.id }) })
+  sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '傲慢' }))[0]
+  await assert.rejects(f.receive(f.message('cancel')), /Agent turn/)
+  assert.deepEqual(f.sent, [])
+})
+test('new input after text acceptance skips the image and retains only delivered text', async t => {
+  let sticker
+  const f = await fixture(t, { remember: false, decision: () => ({ action: 'reply', text: '好', stickerId: sticker.id }),
+    newerInput: () => f.sent.length > 0 })
+  sticker = (await changeSticker(f.root, { action: 'upload', data: stickerData, description: '点头' }))[0]
+  const msg = f.message('changed')
+  await f.receive(msg)
+  assert.equal(f.sent.length, 1)
+  assert.equal((await groupState(f.root)).groups[msg.threadId].lastReply.text, '好')
 })
 test('silent decision discards staged image as well as text', async (t) => {
   const f = await fixture(t, { media: true, action: 'silent' })
