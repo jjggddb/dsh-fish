@@ -107,6 +107,9 @@ test('Fish entry point browses, remembers, then locates the owner comment after 
   notified = true
   runPrompt = async (call, req) => {
     assert.match(prompts.at(-1), /来看看阴天色彩/)
+    const reopened = await call('xhs_read', { action: 'read', feedId: 'note-1' })
+    assert.equal(reopened.sourceMessageId, 'note:note-1')
+    assert.equal(reopened.note.text.includes('阴天色彩'), true)
     assert.doesNotMatch(prompts.at(-1), /SECRET|不相关|忽略以上/)
     const found = await call('her_recall', { query: '阴天色彩' })
     assert.equal(found.found, true)
