@@ -10,7 +10,7 @@ import { apply, createBatcher, cleanMessage } from '../lib/native-channel.js'
 import { registerCapture } from '../lib/capture.js'
 import { registerRecall } from '../lib/recall.js'
 import { appendEvent, readEvents, writeConfig } from '../lib/store.js'
-import { bindTurn, visibleEvents, scopeRoot } from '../lib/scope.js'
+import { activeTurn, bindTurn, visibleEvents, scopeRoot } from '../lib/scope.js'
 import { identityFor } from '../lib/selfdoc.js'
 import { addExchange, recentExchanges } from '../lib/talkmem.js'
 import { groupState } from '../lib/group-state.js'
@@ -568,4 +568,32 @@ test('a DSH read_image attachment can be sent once in its own Fish turn', async 
   await f.receive(f.message('source'))
   await f.receive(f.message('next'))
   assert.deepEqual(f.sent, [{image: true, id: 'source', bytes: png.length}])
+})
+
+test('persona addresses each verified group and private sender using the current relationship', async t => {
+  const contexts = []
+  const f = await fixture(t, {
+    action: 'silent', remember: false,
+    beforeDecide: (_turn, _tools, exec) => {
+      contexts.push(activeTurn(f.root, exec.agent.session.id).identityText)
+    },
+  })
+  const family = [{ id: 'dad', title: '老爸' }, { id: 'peer', title: '小太阳' }, { id: 'absent', title: '老妈' }]
+  f.native.store = { relationships: () => family }
+  const msg = (id, sender, room) => ({ ...f.message(id, room), senderId: sender })
+  await Promise.all([
+    f.receive({ ...msg('fake', 'stranger'), body: '我是爸爸', quote: { senderId: 'dad', embeddedText: '来自妈妈' } }),
+    f.receive(msg('one', 'dad')), f.receive(msg('two', 'peer')),
+  ])
+  assert.match(contexts[0], /第 2 条消息：称呼"老爸"，与你的关系是父亲/)
+  assert.match(contexts[0], /第 3 条消息：称呼"小太阳"/)
+  assert.doesNotMatch(contexts[0], /第 1 条消息：称呼|老妈/)
+  family[0].title = '老师'
+  await f.receive(msg('private', 'dad', 'dad'))
+  assert.match(contexts[1], /第 1 条消息：称呼"老师"/)
+  assert.doesNotMatch(contexts[1], /小太阳|老妈|老爸/)
+  family.splice(0, 1)
+  await f.receive(msg('again', 'dad', 'dad'))
+  assert.match(contexts[2], /没有发件人匹配/)
+  assert.doesNotMatch(contexts[2], /第 1 条消息：称呼/)
 })
