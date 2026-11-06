@@ -30,6 +30,7 @@ test('admin routes fail closed and deleted mutation endpoints are unavailable', 
           : undefined,
   }
   registerObserve(ctx, { root, version: 'test', tenancy: { tenant: { ok: true } } })
+  assert.equal(route.path, '/dsh-fish', 'DSH appends the slash when matching child routes')
   async function request(path, method = 'GET') {
     let status, value
     await route.handler(
