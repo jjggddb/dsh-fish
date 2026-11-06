@@ -45,19 +45,10 @@ Fish 可以自己选择看首页、搜索、打开笔记或休息。主人在评
 部分真实 @ 会被平台归入普通评论通知。对于这类通知，Fish 只处理来自主人 ID、开头点名当前登录鱼昵称的评论，还会在原帖详情中核对评论 ID、作者和点名文字。详情未返回目标评论时保留待核对。平台只提供纯文本时，Fish 无法区分手输同名和从 @ 候选中选中鱼。
 
 1. 单独运行支持通知列表和登录用户 ID 的 [xiaohongshu-mcp](https://github.com/xpzouying/xiaohongshu-mcp) 服务，为它登录鱼的专用账号。Fish 调用同一服务的只读 HTTP API。服务启用 Bearer 鉴权时，把凭据放在 DSH 宿主的 `FISH_XHS_TOKEN` 环境变量。
-2. 在 DSH profile 的 Fish 节点已有的 `config` 下添加：
+2. 打开 DSH「设置 → 大肥鱼 → 小红书」，填写只读服务地址、鱼和主人的主页用户 ID、自主浏览间隔，再勾选启用并保存。两个 ID 取自各自的主页链接；非本机服务须使用 HTTPS。
+3. 在同页查看 `xhs_read` 的授权状态。首次授权时，点「去工具授权」，勾选 `xhs_read`，保存并重启宿主。已有授权时，小红书设置保存即生效；保存本身不会发起浏览，关闭后停止轮询。
 
-   ```yaml
-   xhs:
-     enabled: true
-     baseUrl: http://127.0.0.1:18060
-     accountId: YOUR_FISH_XHS_USER_ID
-     ownerId: YOUR_PERSONAL_XHS_USER_ID
-     intervalMs: 900000
-   ```
-
-   两个 ID 都取自对应账号的个人主页，按稳定用户 ID 配置。服务与 DSH 不在同一台机器或容器时，使用 DSH 可以访问的 HTTPS 地址。
-3. 重载 profile，在「大肥鱼 → DSH 工具授权」勾选 `xhs_read`，保存并重启 DSH Host。缺少授权时不会联网。登录身份与 `accountId` 不符时停止该次读取。
+已有部署首次打开会沿用 profile 的 `config.xhs`。在面板保存后，Fish 使用持久目录内的 `xhs-settings.json`。Bearer 凭据继续由宿主管理，并绑定 profile 的 `config.xhs.baseUrl`（缺省为本机服务）。登录态由小红书服务管理。
 
 默认每 15 分钟给 Fish 一次自主浏览机会，每两分钟检查最近可见的评论和 @ 通知并优先处理一条（可用活动时段遵循已开启的免打扰设置）。重启后继续处理已发现的待办。平台只返回当前可见的通知窗口；离线太久或通知已删除时无法保证补齐。工具调用与通知均无对外发送路径。
 
