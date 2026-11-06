@@ -4,6 +4,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { Store } from '../lib/wechat/store.js'
 import { registerToolRestrict } from '../lib/restrict.js'
 import { changeSticker } from '../lib/stickers.js'
 import { apply, createBatcher, cleanMessage } from '../lib/native-channel.js'
@@ -19,7 +20,7 @@ import { sayToHer, beginTurnWait } from '../lib/say.js'
 
 async function fixture(
   t,
-  { reason = 'completed', action = 'reply', remember = true, media = false, beforeDecide, decision, beforeImage, awaiting = [], newerInput } = {},
+  { reason = 'completed', action = 'reply', remember = true, media = false, beforeDecide, afterDecide, decision, beforeImage, awaiting = [], newerInput } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'fish-group-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -117,6 +118,7 @@ async function fixture(
         await tools
           .get('fish_decide')
           .execute(decision ? decision() : { action, awaitingReplyFrom:awaiting, text: action === 'reply' ? '白饭来啦。' : '' }, exec)
+        await afterDecide?.()
         emit('assistant/message', {
           message: {
             content: [
@@ -454,6 +456,7 @@ test('newer input withdraws a direct draft and reconsiders the original question
   unblock();await Promise.all([initial,next])
   assert.deepEqual(f.sent.map(s=>s.id),['correction'])
   assert.match(f.observed[1],/草稿未发送/);assert.match(f.observed[1],/我改选红色了/)
+  assert.match(f.observed[1],/你觉得蓝色如何/);assert.match(f.observed[1],/"reply":"白饭来啦。"/)
   assert.deepEqual((await groupState(f.root)).recent.map(s=>s.status),['superseded','accepted'])
 })
 test('an answer to Fish without a mention carries the actual last reply and its intended recipient',async t=>{
@@ -476,21 +479,52 @@ test('a hot burst shortens the first-message deadline; new messages never extend
   await Promise.all([a,c]);await b.dispose()
 })
 
-test('a busy room can still interject after reconsidering its draft with a new message',async t=>{
-  let changed=false
-  const checks=[]
-  const f=await fixture(t,{remember:false,newerInput:(_g,ids,options)=>{
-    checks.push({ids,options})
-    // A different bystander keeps talking during both turns.
-    return changed && !options.peer
-  },beforeDecide:async()=>{changed=true}})
-  await f.receive(f.message('old'))
-  await f.receive(f.message('new'))
-  assert.deepEqual(f.sent.map(r=>r.id),['new'])
-  assert.match(f.observed[1],/草稿未发送/)
-  assert.doesNotMatch(f.observed[1],/这轮可能是直接提问/)
-  assert.ok(checks.some(c=>c.options.peer?.includes('person-old')))
+test('unrelated group chatter does not overtake the speaker Fish chose to answer', async t => {
+  const f = await fixture(t, { remember: false })
+  const db = new Store(join(f.root, 'transport'))
+  t.after(() => db.close())
+  f.native.newerInput = (...args) => db.newerInput(...args)
+  const a = f.message('original'), b = f.message('bystander')
+  db.commitEvent('1', a)
+  db.commitEvent('2', b, true)
+  await f.receive(a)
+  await f.receive(b)
+  assert.deepEqual(f.sent.map(item => item.id), ['original', 'bystander'])
+  assert.deepEqual((await groupState(f.root)).recent.map(r => r.status), ['accepted', 'accepted'])
 })
+
+for (const [label, followup, correction] of [
+  ['12:42 group follow-up', '叫醒你你没饭吃', false],
+  ['explicit cancellation', '不用回了', true],
+]) {
+  test(label + ' after fish_decide and before turn/end', async t => {
+    let db, second, first = true
+    const f = await fixture(t, {
+      remember: false,
+      decision: () => first ? {action:'reply', text:'答应的事本鲸照旧，你少插嘴'} : {action:'silent'},
+      afterDecide: () => {
+        if (!first) return
+        first = false
+        db.commitEvent('2', second)
+      },
+    })
+    db = new Store(join(f.root, 'transport')); t.after(() => db.close())
+    f.native.newerInput = (...args) => db.newerInput(...args)
+    f.native.follows = (...args) => db.follows(...args)
+    const original = {...f.message('first'), senderId:'member', body:'别理他'}
+    second = {...f.message('second'), senderId:'member', body:followup}
+    db.commitEvent('1', original)
+    await f.receive(original)
+    await f.receive(second)
+    assert.deepEqual(f.sent.map(item => item.id), correction ? [] : ['first'])
+    assert.deepEqual((await groupState(f.root)).recent.map(r => r.status),
+      [correction ? 'superseded' : 'accepted', 'decision_silent'])
+    if (correction) {
+      assert.match(f.observed[1], /"text":"别理他"/)
+      assert.match(f.observed[1], /"reply":"答应的事本鲸照旧，你少插嘴"/)
+    } else assert.doesNotMatch(f.observed[1], /上一轮草稿未发送/)
+  })
+}
 
 test('a directly addressed draft gets exactly one correlated decision retry and one send',async t=>{
   const f=await fixture(t,{remember:false,beforeDecide:n=>n===1?false:undefined})
@@ -596,4 +630,22 @@ test('persona addresses each verified group and private sender using the current
   await f.receive(msg('again', 'dad', 'dad'))
   assert.match(contexts[2], /没有发件人匹配/)
   assert.doesNotMatch(contexts[2], /第 1 条消息：称呼/)
+})
+
+
+test('another participant cannot consume the draft held for a correction', async t => {
+  let db
+  const f = await fixture(t, {remember: false})
+  db = new Store(join(f.root, 'transport')); t.after(() => db.close())
+  f.native.newerInput = (...args) => db.newerInput(...args)
+  f.native.follows = (...args) => db.follows(...args)
+  const question = {...f.message('question'), senderId:'first', body:'要蓝色还是红色？'}
+  const aside = {...f.message('aside'), senderId:'other', body:'今晚下雨'}
+  const revised = {...f.message('revision'), senderId:'first', body:'我改选红色了'}
+  for (const [i, msg] of [question, aside, revised].entries()) db.commitEvent(String(i+1), msg)
+  await f.receive(question); await f.receive(aside); await f.receive(revised)
+  assert.deepEqual(f.sent.map(part => part.id), ['aside', 'revision'])
+  assert.doesNotMatch(f.observed[1], /上一轮草稿未发送|要蓝色还是红色/)
+  assert.match(f.observed[2], /"text":"要蓝色还是红色？"/)
+  assert.match(f.observed[2], /"reply":"白饭来啦。"/)
 })
