@@ -185,6 +185,10 @@ test('agent guard limits XHS turns to reading and scoped memory even when other 
     for (const name of ['xhs_read', 'her_recall', 'growth_commit']) assert.equal(guard({ name }), undefined)
     for (const name of ['wechat_send_image', 'publish', 'web_fetch']) assert.ok(guard({ name }))
   } finally { release() }
+  start({ id: sessionId }, { type: 'turn/start' })
+  assert.deepEqual(visible, ['her_recall'])
+  assert.equal(guard({ name: 'her_recall' }), undefined)
+  for (const name of ['publish', 'growth_commit', 'xhs_read']) assert.ok(guard({ name }))
 })
 
 test('a failed mention survives restart and can complete from its stored location while the notification list is unavailable', async t => {
