@@ -6,13 +6,13 @@
 
 ## 安装
 
-线上使用 Node.js ≥ 22.19、DSH `0.2.1-rc.5` 和 Native `1.5.1`。先启动 Native、登录微信并取得账号、机器人和目标群的准确 ID，再安装 Fish。
+线上使用 Node.js ≥ 22.19、DSH `0.2.1-rc.5` 和 Native `1.5.1`。先启动 Native，取得账号和机器人身份，再安装 Fish。
 
 ```sh
 dsh plugin --profile my-profile add git+https://github.com/jjggddb/dsh-fish.git#wechat-deployment
 ```
 
-在 DSH 宿主环境设置 `WECHAT_NATIVE_TOKEN`，在 profile 的 `cordis.patch.yml` 中配置已安装的 Fish 节点。将占位值替换为 Native 返回的 ID。
+在 DSH 宿主环境设置 `WECHAT_NATIVE_TOKEN`，在 profile 的 `cordis.patch.yml` 中配置已安装的 Fish 节点。填入 Native 的账号和机器人身份；会话名单随后在设置页按名称添加。
 
 ```yaml
 - id: dsh-fish
@@ -23,13 +23,14 @@ dsh plugin --profile my-profile add git+https://github.com/jjggddb/dsh-fish.git#
       baseUrl: http://127.0.0.1:6174/
       accountId: YOUR_NATIVE_ACCOUNT_ID
       selfId: YOUR_BOT_WECHAT_ID
-      groups:
-        - id: '123456@chatroom'
+      groups: []
       dataDir: /data/wechat-transport
       sending: false
 ```
 
-重载 profile，打开「大肥鱼 → 微信」。未登录时可扫码登录。微信群和私聊联系人都可逐条添加、检测或删除，勾选「允许发送回复」后保存即可生效。首次使用 profile 中的名单，此后以面板保存的设置为准。跨容器连接 Native 时使用 HTTPS。
+重载 profile，打开「大肥鱼 → 微信」。未登录时可扫码登录。输入微信群名称、联系人昵称或备注，点「检测」并保存；同名需选择，名单可逐条增删，勾选「允许发送回复」后保存即可生效。首次使用 profile 中的名单，此后以面板保存的设置为准。跨容器连接 Native 时使用 HTTPS。
+
+私聊、真实 @ 和引用鱼的消息优先处理。普通群消息使用独立的旁听额度，同一会话按轮串行，静默时段适用于两者。
 
 ## 工具与记忆
 

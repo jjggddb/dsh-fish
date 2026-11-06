@@ -381,3 +381,30 @@ test('a private chat reaches its own DSH session, remembers its peer and replies
   assert.equal((await readChannels(f.root)).length, 2)
   assert.doesNotMatch(f.observed.at(-1), /dm-one/)
 })
+
+test('direct windows overtake waiting ordinary windows but never interrupt the current turn',async()=>{
+  let started,release
+  const ready=new Promise(r=>started=r), gate=new Promise(r=>release=r), seen=[]
+  const batch=createBatcher(async (_g,[m])=>{
+    seen.push(m.id);if(m.id==='active'){started();await gate}
+  },{maxBatch:1,isDirect:m=>m.direct})
+  const push=(id,direct=false)=>batch.push({threadId:'room',id,direct})
+  const active=push('active');await ready
+  const casual=push('ordinary'), first=push('direct1',true),second=push('direct2',true)
+  release();await Promise.all([active,casual,first,second]);await batch.dispose()
+  assert.deepEqual(seen,['active','direct1','direct2','ordinary'])
+})
+test('exhausted observation budget still admits real mentions and replies to Fish',async(t)=>{
+  const f=await fixture(t,{remember:false})
+  await writeConfig({group:{quietHours:[0,0],batchMs:50,maxTurnsPerHour:1,maxDirectTurnsPerHour:2,maxRepliesPerMinute:4}},f.root)
+  await f.receive(f.message('one'))
+  await f.receive(f.message('two'))
+  const mention=f.message('mention');mention.mentions.self=true
+  const ambient=f.message('trailing')
+  await Promise.all([f.receive(mention),f.receive(ambient)])
+  const quote=f.message('quote');quote.quote={senderId:'bot'}
+  await f.receive(quote)
+  await f.receive({...mention,id:'limit'})
+  assert.deepEqual(f.sent.map(r=>r.id),['one','mention','quote'])
+  assert.deepEqual((await groupState(f.root)).recent.map(x=>x.status),['accepted','turn_budget','accepted','accepted','direct_budget'])
+})

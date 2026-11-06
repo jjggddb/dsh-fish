@@ -136,3 +136,15 @@ test('bounded concurrent delivery lets Fish merge messages but only acknowledges
  release();await f.transport.draining
  assert.equal(seen.length,20);assert.deepEqual(f.store.stats(),{done:20})
 })
+test('a new mention reaches Fish while sixteen ordinary inbox callbacks are still pending',async t=>{
+ const f=fixture(t);await f.transport.verify()
+ for(let i=1;i<=16;i++)await f.transport.ingest(f.event(f.message('casual'+i),String(i)))
+ let release;const gate=new Promise(r=>release=r),seen=[]
+ f.transport.subscribe(async m=>{seen.push(m.id);if(m.id!=='direct')await gate})
+ const m=f.message('direct',{mentions:{self:true,userIds:['bot']}})
+ try {
+   await f.transport.ingest(f.event(m,'17'))
+   for(let i=0;i<30&&!seen.includes('direct');i++)await delay(5)
+   assert.ok(seen.includes('direct'))
+ } finally {release();await f.transport.draining}
+})

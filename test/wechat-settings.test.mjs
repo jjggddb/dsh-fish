@@ -163,3 +163,31 @@ test('original growth summary computes real event counts and diagnostics for the
   assert.ok(s.quality.stability.band)
   assert.equal(s.avatar.present, false)
 })
+
+test('name detection reads all pages, prompts for duplicate names, and resolves contact remarks',async(t)=>{
+  const {client,admin}=await fixture(t)
+  client.groups=async(_account,opts)=>opts.cursor
+    ? {items:[{id:'2@chatroom',roomId:'2@chatroom',name:'读书群'}],nextCursor:null}
+    : {items:[{roomId:'1@chatroom',displayName:'读书群'},{roomId:'3@chatroom',displayName:'读书群二'}],nextCursor:'page2'}
+  client.group=async(_a,id)=>({roomId:id,displayName:'读书群',remark:id==='1@chatroom'?'周末组':'周三组'})
+  const ambiguous=await admin.detect('groups',{name:'读书群'})
+  assert.deepEqual(ambiguous.candidates.map(x=>x.id),['1@chatroom','2@chatroom'])
+  client.contacts=async()=>({items:[{username:'friend',remark:'小林',nickname:'林同学'},{deleted:true,id:'removed'}],nextCursor:null})
+  assert.equal((await admin.detect('contacts',{name:'小林'})).id,'friend')
+  await assert.rejects(admin.detect('contacts',{name:'林'}),/没有找到/)
+})
+
+test('one host seed correction reaches growth and Agent without rewriting historical bytes',async(t)=>{
+  const {root}=await fixture(t)
+  const {readFile}=await import('node:fs/promises')
+  const {identityFor}=await import('../lib/selfdoc.js')
+  const old=await appendEvent({type:'seed',text:'我来自一个QQ群。'},{source:'system'},root)
+  const before=await readFile(join(root,'events.jsonl'),'utf8')
+  await assert.rejects(appendEvent({type:'seed_revision',text:'其他',refs:[old.id]},{source:'tool'},root))
+  await assert.rejects(appendEvent({type:'seed_revision',text:'其他',refs:['invalid']},{source:'system'},root))
+  await appendEvent({type:'seed_revision',text:'我来自一个微信群。',refs:[old.id]},{source:'system'},root)
+  assert.equal((await settingsState(root)).seed,'我来自一个微信群。')
+  const prompt=await identityFor(root,{scene:'group',groupId:'test',accountId:'a'})
+  assert.match(prompt,/一个微信群/);assert.doesNotMatch(prompt,/QQ群/)
+  assert.ok((await readFile(join(root,'events.jsonl'),'utf8')).startsWith(before))
+})
